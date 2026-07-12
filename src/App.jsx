@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import {
   PieChart, Wallet, ArrowRightLeft, BarChart3, Coins,
   Landmark, TrendingUp, Banknote, Building2,
@@ -130,6 +131,9 @@ function FontLoader() {
       @keyframes mzRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes mzFade { from { opacity: 0; } to { opacity: 1; } }
       @keyframes mzShimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+      @keyframes mzFloat { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-10px, 8px); } }
+      @keyframes mzGrowX { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+      .mz-float { animation: mzFloat 9s ease-in-out infinite; }
 
       .mz-skel { border-radius: 1rem; background: linear-gradient(90deg, var(--sub) 25%, var(--sub2) 50%, var(--sub) 75%); background-size: 200% 100%; animation: mzShimmer 1.3s linear infinite; }
 
@@ -145,7 +149,7 @@ function FontLoader() {
       .mz-card { background: var(--card); border: 1px solid var(--line); transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease; }
       .mz-card:hover { box-shadow: 0 10px 30px rgba(20,35,72,0.10); transform: translateY(-1px); border-color: ${ACCENT}33; }
 
-      .mz-bar { transition: width 0.6s cubic-bezier(.22,1,.36,1); }
+      .mz-bar { transition: width 0.6s cubic-bezier(.22,1,.36,1); transform-origin: left; animation: mzGrowX 0.7s cubic-bezier(.22,1,.36,1) both; }
 
       /* bottom tab bar */
       .mz-bottombar { background: color-mix(in srgb, var(--card) 84%, transparent); border-top: 1px solid var(--line); }
@@ -169,7 +173,7 @@ function FontLoader() {
       @keyframes mzSheet { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 
       @media (prefers-reduced-motion: reduce) {
-        .mz-tabview > *, .mz-tablabel, .mz-tabicon, .mz-bar, .mz-card, .mz-toast, .mz-skel, .mz-fab, .mz-iconbtn, .mz-modal, .mz-backdrop { animation: none !important; transition: none !important; }
+        .mz-tabview > *, .mz-tablabel, .mz-tabicon, .mz-bar, .mz-card, .mz-toast, .mz-skel, .mz-fab, .mz-iconbtn, .mz-modal, .mz-backdrop, .mz-float { animation: none !important; transition: none !important; }
       }
     `}</style>
   );
@@ -192,24 +196,13 @@ const TAXONOMY = {
 };
 const MAIN_CATS = Object.keys(TAXONOMY);
 
+/* New users start on a clean slate — no demo accounts or holdings.
+   SEED_PRICES stays: it's reference market data, not user data, and valuation
+   needs a sane baseline until the first refresh. */
 const SEED_STATE = {
-  accounts: [
-    { id: "a1", name: "Thndr — Clouds (Instant)", assetClass: "Money market", unit: "EGP", balance: 338564.38, broker: "Thndr" },
-    { id: "a2", name: "Thndr — Wallet", assetClass: "Cash", unit: "EGP", balance: 48520, broker: "Thndr" },
-    { id: "a3", name: "Azimut Gold (AZG)", assetClass: "Gold", unit: "EGP", balance: 45725.2, broker: "Thndr" },
-    { id: "a4", name: "Beltone fund (BWA)", assetClass: "Equity", unit: "EGP", balance: 9762.29, broker: "Thndr" },
-    { id: "a5", name: "Al Fanar (FNAR)", assetClass: "Equity", unit: "EGP", balance: 58.35, broker: "Thndr" },
-    { id: "a6", name: "CIB — debit", assetClass: "Cash", unit: "EGP", balance: 86768 },
-    { id: "a7", name: "Cash (EGP)", assetClass: "Cash", unit: "EGP", balance: 80000 },
-    { id: "a8", name: "CIB — card (installments)", assetClass: "Cash", unit: "EGP", balance: -50105, isLiability: true },
-    { id: "a9", name: "Physical gold — 24K", assetClass: "Gold", unit: "GOLD", karat: 24, balance: 5 },
-    { id: "a10", name: "Physical gold — 21K", assetClass: "Gold", unit: "GOLD", karat: 21, balance: 4 },
-    { id: "a11", name: "Physical gold — 18K", assetClass: "Gold", unit: "GOLD", karat: 18, balance: 16.63 },
-    { id: "a12", name: "ADIB ($)", assetClass: "Cash", unit: "USD", balance: 10 },
-    { id: "a13", name: "Cash ($)", assetClass: "Cash", unit: "USD", balance: 250 },
-  ],
+  accounts: [],
   transactions: [],
-  targets: { "Money market": 40, Gold: 25, Equity: 27, Cash: 8 },
+  targets: { "Money market": 0, Gold: 0, Equity: 0, Cash: 0 },
   budgets: {},
   debts: [],
 };
@@ -330,26 +323,32 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const ToastCtx = createContext(() => {});
 
 /* ---------- modal overlay: bottom sheet on phones, centered dialog on wider screens ---------- */
+/* Rendering through a portal matters: ancestors inside the tab views carry CSS
+   transforms (entrance animations, card hover lift), and a transformed ancestor
+   turns position:fixed into position-relative-to-that-ancestor — which pushed
+   modals down the page and sometimes off-screen. Portaling to <body> anchors
+   them to the real viewport, centered on every screen size. */
 function Modal({ title, onClose, children }) {
   useEffect(() => {
     const h = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
     const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden"; // lock page scroll behind the sheet
+    document.body.style.overflow = "hidden"; // lock page scroll behind the dialog
     return () => { window.removeEventListener("keydown", h); document.body.style.overflow = prev; };
   }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label={title}>
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 mz-backdrop" onClick={onClose} />
-      <div className="mz-modal relative w-full sm:max-w-md max-h-[88vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4"
-           style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 -12px 40px rgba(8,14,28,0.30)" }}>
+      <div className="mz-modal relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-4"
+           style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 24px 60px rgba(8,14,28,0.35)" }}>
         <div className="flex items-center justify-between mb-3">
           <CardTitle>{title}</CardTitle>
           <button onClick={onClose} aria-label="Close" className="mz-iconbtn mz-tx3 -mr-2"><X size={16} strokeWidth={2} /></button>
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -551,13 +550,13 @@ export default function Mizan() {
 
           <div key={tab} className="mz-tabview space-y-3">
             {tab === "overview" && (
-              <Overview byClass={byClass} liquidTotal={liquidTotal} illiquidTotal={illiquidTotal} liabilities={liabilities} targets={state.targets} prices={prices} fetching={fetching} onRefresh={refreshPrices} onRefreshWeb={refreshWeb} webBusy={webBusy} webErr={webErr} />
+              <Overview byClass={byClass} liquidTotal={liquidTotal} illiquidTotal={illiquidTotal} liabilities={liabilities} targets={state.targets} prices={prices} fetching={fetching} onRefresh={refreshPrices} onRefreshWeb={refreshWeb} webBusy={webBusy} webErr={webErr} hasAccounts={state.accounts.length > 0} onNavigate={setTab} />
             )}
             {tab === "accounts" && (
               <Accounts valued={valued} setState={setState} prices={prices} state={state} />
             )}
             {tab === "activity" && (
-              <Activity state={state} setState={setState} prices={prices} focusSignal={qaFocus} />
+              <Activity state={state} setState={setState} prices={prices} focusSignal={qaFocus} onNavigate={setTab} />
             )}
             {tab === "spending" && (
               <Spending state={state} setState={setState} prices={prices} />
@@ -656,6 +655,13 @@ function SparkLine({ history }) {
         </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-9" role="img" aria-label="Net worth history">
+        <defs>
+          <linearGradient id="mzsparkfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ACCENT} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={ACCENT} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={`M ${pts.split(" ")[0]} L ${pts.split(" ").slice(1).join(" L ")} L ${W},${H} L 0,${H} Z`} fill="url(#mzsparkfill)" />
         <polyline points={pts} fill="none" stroke={ACCENT} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         <circle cx={lx} cy={ly} r="3" fill={ACCENT} />
       </svg>
@@ -683,8 +689,8 @@ function NetWorthBlock({ net, assets, liabilities, byClass, targets, prices, liq
 
   return (
     <div className="relative rounded-2xl p-5 mb-3 overflow-hidden" style={{ background: INK, border: `1px solid ${HAIRLINE}` }}>
-      {/* ambient glow */}
-      <div className="pointer-events-none absolute -top-16 -right-10 w-56 h-56 rounded-full"
+      {/* ambient glow, drifting slowly */}
+      <div className="pointer-events-none absolute -top-16 -right-10 w-56 h-56 rounded-full mz-float"
            style={{ background: `radial-gradient(closest-side, ${ACCENT}33, transparent)` }} />
 
       <div className="relative">
@@ -864,9 +870,77 @@ function ZakatCard({ liquidTotal, liabilities, prices }) {
   );
 }
 
+/* ---------- allocation donut: animated draw-in, center shows liquid total ---------- */
+function AllocationDonut({ byClass, liquidTotal }) {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    if (typeof requestAnimationFrame === "undefined") { setDrawn(true); return; }
+    const raf = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const R = 40, C = 2 * Math.PI * R;
+  const base = liquidTotal || 1;
+  let acc = 0;
+  const segs = LIQUID_CLASSES.map((c) => {
+    const frac = (byClass[c] || 0) / base;
+    const seg = { c, frac, offset: acc };
+    acc += frac;
+    return seg;
+  }).filter((s) => s.frac > 0.001);
+  return (
+    <div className="relative w-[132px] h-[132px] shrink-0 mx-auto sm:mx-0">
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        <g transform="rotate(-90 50 50)">
+          <circle cx="50" cy="50" r={R} fill="none" stroke="var(--sub2)" strokeWidth="11" />
+          {segs.map((s) => (
+            <circle key={s.c} cx="50" cy="50" r={R} fill="none"
+              stroke={CLASS_COLOR[s.c]} strokeWidth="11" strokeLinecap="butt"
+              strokeDasharray={drawn ? `${Math.max(s.frac * C - 1.5, 0.5)} ${C}` : `0.5 ${C}`}
+              strokeDashoffset={-s.offset * C}
+              style={{ transition: "stroke-dasharray 0.9s cubic-bezier(.22,1,.36,1)" }} />
+          ))}
+        </g>
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-[9px] uppercase tracking-widest mz-tx2" style={{ fontFamily: MONO_FONT }}>liquid</span>
+        <span className="tabular-nums text-[13px] font-semibold mz-tx1" style={{ fontFamily: MONO_FONT }}>{fmtEGPShort(liquidTotal)}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- first-run welcome ---------- */
+function WelcomeCard({ onNavigate }) {
+  return (
+    <Card>
+      <div className="text-center py-4">
+        <div className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center mb-3" style={{ background: ACCENT + "1A", color: ACCENT }}>
+          <Wallet size={22} strokeWidth={2} />
+        </div>
+        <div className="text-base font-semibold mz-tx1" style={{ fontFamily: DISPLAY_FONT }}>Welcome to Mizan</div>
+        <p className="text-[13px] mz-tx2 mt-1.5 max-w-sm mx-auto leading-relaxed">
+          Add your accounts — cash, money market, gold by karat, funds — and Mizan values everything in EGP at live prices, tracks your allocation, and logs spending from plain-language notes.
+        </p>
+        <button onClick={() => onNavigate("accounts")} className="mz-btn-primary inline-flex items-center gap-1.5 text-sm font-medium px-5 py-2.5 rounded-xl mt-4">
+          <Plus size={16} strokeWidth={2.4} /> Add your first account
+        </button>
+        <p className="text-[11px] mz-tx3 mt-3" style={{ fontFamily: MONO_FONT }}>everything stays in your browser</p>
+      </div>
+    </Card>
+  );
+}
+
 /* ---------- overview ---------- */
-function Overview({ byClass, liquidTotal, illiquidTotal, liabilities, targets, prices, fetching, onRefresh, onRefreshWeb, webBusy, webErr }) {
+function Overview({ byClass, liquidTotal, illiquidTotal, liabilities, targets, prices, fetching, onRefresh, onRefreshWeb, webBusy, webErr, hasAccounts, onNavigate }) {
   const total = liquidTotal || 1;
+  if (!hasAccounts) {
+    return (
+      <div className="space-y-3">
+        <WelcomeCard onNavigate={onNavigate} />
+        <GoldCard prices={prices} fetching={fetching} onRefresh={onRefresh} onRefreshWeb={onRefreshWeb} webBusy={webBusy} webErr={webErr} />
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
       <Card>
@@ -874,7 +948,9 @@ function Overview({ byClass, liquidTotal, illiquidTotal, liabilities, targets, p
           <CardTitle>Allocation vs. target</CardTitle>
           <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: MONO_FONT, color: "var(--muted)" }}>liquid only</span>
         </div>
-        <div className="space-y-3 mt-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 mt-3">
+          <AllocationDonut byClass={byClass} liquidTotal={liquidTotal} />
+          <div className="space-y-3 flex-1 min-w-0">
           {LIQUID_CLASSES.map((c) => {
             const actual = (byClass[c] / total) * 100;
             const tgt = targets[c] || 0;
@@ -906,6 +982,7 @@ function Overview({ byClass, liquidTotal, illiquidTotal, liabilities, targets, p
               </div>
             );
           })}
+          </div>
         </div>
       </Card>
 
@@ -930,7 +1007,7 @@ function Overview({ byClass, liquidTotal, illiquidTotal, liabilities, targets, p
 
       <GoldCard prices={prices} fetching={fetching} onRefresh={onRefresh} onRefreshWeb={onRefreshWeb} webBusy={webBusy} webErr={webErr} />
 
-      <ZakatCard liquidTotal={liquidTotal} liabilities={liabilities} prices={prices} />
+      {liquidTotal > 0 && <ZakatCard liquidTotal={liquidTotal} liabilities={liabilities} prices={prices} />}
     </div>
   );
 }
@@ -1715,7 +1792,7 @@ function Spending({ state, setState, prices }) {
 }
 
 /* ---------- activity ---------- */
-function Activity({ state, setState, prices, focusSignal }) {
+function Activity({ state, setState, prices, focusSignal, onNavigate }) {
   const toast = useContext(ToastCtx);
   const [open, setOpen] = useState(false);
   const [parsed, setParsed] = useState(null);
@@ -1862,6 +1939,27 @@ function Activity({ state, setState, prices, focusSignal }) {
     setParsed(null);
     setFormKey((k) => k + 1);
     setOpen(true); // closing is the modal's job (X, backdrop, or Escape)
+  }
+
+  // clean slate: transactions need an account to move money in or out of
+  if (accs.length === 0) {
+    return (
+      <div className="space-y-3">
+        <Card>
+          <div className="text-center py-3">
+            <div className="mx-auto w-11 h-11 rounded-2xl flex items-center justify-center mb-2.5" style={{ background: ACCENT + "1A", color: ACCENT }}>
+              <ArrowRightLeft size={20} strokeWidth={2} />
+            </div>
+            <div className="text-sm font-semibold mz-tx1">No accounts yet</div>
+            <p className="text-[12px] mz-tx2 mt-1 max-w-xs mx-auto">Transactions move money between accounts, so add at least one first — then log spending here in plain language.</p>
+            <button onClick={() => onNavigate("accounts")} className="mz-btn-primary inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-xl mt-3">
+              <Plus size={15} strokeWidth={2.4} /> Add an account
+            </button>
+          </div>
+        </Card>
+        <DebtLedger state={state} setState={setState} />
+      </div>
+    );
   }
 
   return (
@@ -2512,15 +2610,15 @@ function SettingsPage({ settings, setSettings, state, setState, prices, setPrice
       </Card>
 
       <Card>
-        <CardTitle>Reset</CardTitle>
-        <p className="text-[12px] mz-tx2 mt-1">Restores the seeded accounts from your screenshots and clears your changes. Export first if you might want them back.</p>
+        <CardTitle>Erase all data</CardTitle>
+        <p className="text-[12px] mz-tx2 mt-1">Deletes every account, transaction, and snapshot from this browser and starts over on a clean slate. Export a backup first if you might want anything back.</p>
         {confirmReset ? (
           <div className="flex gap-2 mt-2">
-            <button onClick={reset} className="flex-1 bg-rose-600 text-white text-sm font-medium py-2 rounded-lg">Yes, reset everything</button>
+            <button onClick={reset} className="flex-1 bg-rose-600 text-white text-sm font-medium py-2 rounded-lg">Yes, erase everything</button>
             <button onClick={() => setConfirmReset(false)} className="px-4 text-sm mz-tx2">Keep my data</button>
           </div>
         ) : (
-          <button onClick={() => setConfirmReset(true)} className="text-sm text-rose-600 font-medium mt-2">Reset to seed</button>
+          <button onClick={() => setConfirmReset(true)} className="text-sm text-rose-600 font-medium mt-2">Erase &amp; start fresh</button>
         )}
       </Card>
       </div>
