@@ -83,18 +83,21 @@ function FontLoader() {
   }, []);
   return (
     <style>{`
-      /* ---- theme tokens ---- */
-      .mz-root {
+      /* ---- theme tokens ----
+         Defined on :root (the <html> element, which App tags with data-theme)
+         rather than .mz-root, so portaled content — modals render into <body>,
+         outside .mz-root — still resolves every variable. */
+      :root {
         --bg: #EEF3FB; --card: #FFFFFF; --line: #DCE4F1;
         --ink: #1B2740; --muted: #6B7A93; --faint: #A6B3C9;
         --sub: #F1F5FA; --sub2: #E3EAF4;
-        background: var(--bg); color: var(--ink);
       }
-      .mz-root[data-theme="dark"] {
+      :root[data-theme="dark"] {
         --bg: #0B1424; --card: #121F38; --line: #243756;
         --ink: #E7EEFB; --muted: #93A3C2; --faint: #5E6F8F;
         --sub: #1A2A4A; --sub2: #24365E;
       }
+      .mz-root { background: var(--bg); color: var(--ink); }
 
       /* ---- var-driven utilities (theme both ways) ---- */
       .mz-tx1 { color: var(--ink); } .mz-tx2 { color: var(--muted); } .mz-tx3 { color: var(--faint); }
@@ -111,10 +114,10 @@ function FontLoader() {
       .mz-note-teal  { background: rgba(13,148,136,0.10); border-color: rgba(13,148,136,0.30); }
       .mz-note-blue  { background: rgba(59,125,255,0.10); border-color: rgba(59,125,255,0.30); }
       .mz-note-mut   { background: var(--sub); border-color: var(--line); }
-      .mz-txblue { color: #2563EB; } .mz-root[data-theme="dark"] .mz-txblue { color: #7EA6FF; }
-      .mz-txteal { color: #0F766E; } .mz-root[data-theme="dark"] .mz-txteal { color: #2DD4BF; }
-      .mz-txamber { color: #B45309; } .mz-root[data-theme="dark"] .mz-txamber { color: #FBBF24; }
-      .mz-txamber2 { color: #78350F; } .mz-root[data-theme="dark"] .mz-txamber2 { color: #FDE68A; }
+      .mz-txblue { color: #2563EB; } :root[data-theme="dark"] .mz-txblue { color: #7EA6FF; }
+      .mz-txteal { color: #0F766E; } :root[data-theme="dark"] .mz-txteal { color: #2DD4BF; }
+      .mz-txamber { color: #B45309; } :root[data-theme="dark"] .mz-txamber { color: #FBBF24; }
+      .mz-txamber2 { color: #78350F; } :root[data-theme="dark"] .mz-txamber2 { color: #FDE68A; }
 
       .mz-btn-primary { background: ${ACCENT}; color: #FFFFFF; transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; box-shadow: 0 1px 2px rgba(12,23,48,0.10); }
       .mz-btn-primary:hover:not(:disabled) { background: ${ACCENT_DIM}; box-shadow: 0 4px 14px rgba(59,125,255,0.28); }
@@ -287,17 +290,18 @@ async function fetchLivePrices(prev) {
   };
 }
 
-/* ---------- web price fetch via AI + search grounding ---------- */
+/* ---------- web price fetch via AI (+ search grounding when available) ---------- */
 async function fetchWebPrices(ai) {
   const today = new Date().toISOString().slice(0, 10);
   const prompt =
-    `Today's date is ${today}. You MUST use your web/search tool to look up the most recent Egyptian gold price ` +
-    `and USD/EGP rate — do not answer from memory. Search Arabic sources like "سعر جرام الذهب عيار 24 مصر اليوم". ` +
-    "Find a source whose price is dated today or as recent as possible, and read the date it was published. " +
-    "Then reply with ONLY a JSON object, no prose, no markdown fences. Exact shape: " +
-    '{"gold24_egp_per_gram": <number>, "usd_egp": <number>, "as_of_date": "YYYY-MM-DD", "source": "<short site name>"}. ' +
+    `Today's date is ${today}. I need the current Egyptian local-market gold price and USD/EGP rate. ` +
+    `If you have a web/search tool available, USE IT — search Arabic sources like "سعر جرام الذهب عيار 24 مصر اليوم" ` +
+    "and report the most recently dated price you find, with the date the source published it. " +
+    "If you cannot search, give your best known recent values and set as_of_date honestly to the date your knowledge is from — do not claim today's date for remembered values. " +
+    "Reply with ONLY a JSON object, no prose, no markdown fences. Exact shape: " +
+    '{"gold24_egp_per_gram": <number>, "usd_egp": <number>, "as_of_date": "YYYY-MM-DD", "source": "<short site name, or \'model knowledge\'>"}. ' +
     "gold24_egp_per_gram = price of one gram of 24-karat gold in the Egyptian local market (الصاغة), in EGP. " +
-    "usd_egp = Egyptian pounds per one US dollar. as_of_date = the date the price you are reporting was published by that source.";
+    "usd_egp = Egyptian pounds per one US dollar.";
   const text = await ai({ prompt, search: true });
   const match = text.replace(/```json/g, "").replace(/```/g, "").match(/\{[\s\S]*\}/);
   if (!match) throw new Error("no-json");
@@ -306,7 +310,8 @@ async function fetchWebPrices(ai) {
   const usdEgp = Number(parsed.usd_egp);
   if (!(gold24 > 2000 && gold24 < 20000)) throw new Error("gold-range");
   if (!(usdEgp > 20 && usdEgp < 150)) throw new Error("fx-range");
-  const priceDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.as_of_date || "") ? parsed.as_of_date : today;
+  let priceDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.as_of_date || "") ? parsed.as_of_date : today;
+  if (priceDate > today) priceDate = today; // never trust a future-dated claim
   const stale = (Date.now() - new Date(priceDate).getTime()) / 86400000 > 2;
   return {
     gold24,
@@ -427,6 +432,11 @@ export default function Mizan() {
   useEffect(() => {
     if (loaded) saveKey("mizan:ui", { theme });
   }, [theme, loaded]);
+  // theme variables live on :root — keep the <html> attribute in sync so
+  // portaled modals (rendered into <body>) get the right palette
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
   useEffect(() => {
     if (loaded) saveKey("mizan:settings", settings);
   }, [settings, loaded]);

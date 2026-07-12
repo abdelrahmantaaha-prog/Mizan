@@ -101,10 +101,20 @@ async function geminiRequest(model, body, key) {
     throw e;
   }
   const text = ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [])
+    .filter((p) => p.thought !== true) // 2.5 models can emit reasoning parts; keep only the answer
     .map((p) => p.text || "")
     .join("");
   if (!text) throw new Error("empty-response");
   return text;
+}
+
+/* Search grounding is its own failure class: free-tier keys and lite models
+   frequently can't use the google_search tool (400 INVALID_ARGUMENT /
+   "Search Grounding is not supported"). That shouldn't kill the request —
+   the right retry is the same model without the tool. */
+function isGroundingError(err) {
+  const msg = ((err && err.message) || "").toLowerCase();
+  return /grounding|google_search|search tool|tool is not supported|tools? (is|are) not (supported|enabled)/.test(msg);
 }
 
 async function geminiCall({ prompt, system, image, search }, cfg) {
@@ -113,27 +123,44 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
   const parts = [];
   if (image) parts.push({ inline_data: { mime_type: image.media, data: image.data } });
   parts.push({ text: prompt });
-  const body = {
-    contents: [{ role: "user", parts }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
+  const makeBody = (useSearch) => {
+    const body = {
+      contents: [{ role: "user", parts }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
+    };
+    if (system) body.systemInstruction = { parts: [{ text: system }] };
+    if (useSearch) body.tools = [{ google_search: {} }];
+    return body;
   };
-  if (system) body.systemInstruction = { parts: [{ text: system }] };
-  if (search) body.tools = [{ google_search: {} }];
 
   // build the try-order: chosen model first (unless auto), then resolved candidates
   const resolved = await resolveCandidates(key);
   const chosen = cfg.geminiModel && cfg.geminiModel !== "auto" ? cfg.geminiModel : null;
   const order = [...new Set([...(chosen ? [chosen] : []), ...resolved, ...FALLBACK_CHAIN])].slice(0, 5);
 
+  let searchOk = !!search; // once grounding proves unavailable, stop asking for it
   let lastErr;
   for (const model of order) {
     try {
-      const text = await geminiRequest(model, body, key);
+      const text = await geminiRequest(model, makeBody(searchOk), key);
       lastUsed = model;
       return text;
     } catch (e) {
       lastErr = e;
-      if (!isFallthroughError(e.status, e)) throw e; // auth errors, bad requests: fail loud
+      if (searchOk && isGroundingError(e)) {
+        // retry this same model tool-free before walking down the chain
+        searchOk = false;
+        try {
+          const text = await geminiRequest(model, makeBody(false), key);
+          lastUsed = model;
+          return text;
+        } catch (e2) {
+          lastErr = e2;
+          if (!isFallthroughError(e2.status, e2)) throw e2;
+        }
+      } else if (!isFallthroughError(e.status, e)) {
+        throw e; // auth errors, bad requests: fail loud
+      }
       // a resolved candidate that 404s means our cache is stale — drop it
       if (resolvedCache && resolvedCache.key === key) {
         resolvedCache = { key, candidates: resolvedCache.candidates.filter((m) => m !== model) };
