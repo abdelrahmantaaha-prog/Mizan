@@ -44,7 +44,13 @@ Quick-add parsing, receipt reading, balance sync from screenshots, and the
 
 1. Get a free key at https://aistudio.google.com/apikey
 2. In the app: **gear icon → Settings → AI features → paste key → Save** (use
-   *Test key* to verify).
+   *Test key* to verify — it reports which model answered).
+
+The model defaults to **auto**: the app asks Google's ListModels API which
+Flash models your key supports, uses the newest, and falls back automatically
+(flash → flash-lite → older pinned IDs) if Google retires a model ID or a
+free-tier quota runs out. Pinning a specific model in Settings keeps the same
+safety net.
 
 The key is stored only in your browser's localStorage and sent only to Google's
 API. Without a key, AI boxes fall back to a built-in offline parser for simple

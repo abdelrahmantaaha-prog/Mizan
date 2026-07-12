@@ -416,7 +416,12 @@ export default function Mizan() {
       if (p) setPrices(p);
       if (Array.isArray(h)) setHistory(h);
       if (ui && (ui.theme === "dark" || ui.theme === "light")) setTheme(ui.theme);
-      if (cfg && typeof cfg === "object") setSettings((d) => ({ ...d, ...cfg }));
+      if (cfg && typeof cfg === "object") {
+        // migrate: the old default pinned "gemini-2.5-flash", which Google can retire.
+        // "auto" resolves the current Flash at call time instead.
+        if (cfg.geminiModel === "gemini-2.5-flash") cfg.geminiModel = "auto";
+        setSettings((d) => ({ ...d, ...cfg }));
+      }
       setLoaded(true);
     })();
   }, []);
@@ -2372,7 +2377,11 @@ function SettingsPage({ settings, setSettings, state, setState, prices, setPrice
     setTesting(true);
     setTestMsg(null);
     const r = await testGeminiKey(keyDraft.trim(), settings.geminiModel);
-    setTestMsg(r.ok ? { ok: true, text: "Key works — " + (settings.geminiModel || DEFAULT_GEMINI_MODEL) + " responded." } : { ok: false, text: "Key check failed: " + r.error });
+    setTestMsg(
+      r.ok
+        ? { ok: true, text: "Key works — answered by " + (r.model || "Gemini") + "." }
+        : { ok: false, text: "Key check failed: " + r.error }
+    );
     setTesting(false);
   }
 
@@ -2456,8 +2465,11 @@ function SettingsPage({ settings, setSettings, state, setState, prices, setPrice
             </Field>
             <Field label="Model">
               <select className={inputCls} value={settings.geminiModel || DEFAULT_GEMINI_MODEL} onChange={(e) => setSettings((s) => ({ ...s, geminiModel: e.target.value }))}>
-                {GEMINI_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {GEMINI_MODELS.map((m) => (
+                  <option key={m} value={m}>{m === "auto" ? "auto — latest Flash (recommended)" : m}</option>
+                ))}
               </select>
+              <p className="text-[11px] mz-tx3 mt-1">Auto picks the newest Flash model your key supports and falls back automatically if Google retires one or a quota runs out.</p>
             </Field>
             <div className="flex gap-2 pt-1">
               <button onClick={saveAI} className="flex-1 mz-btn-primary text-sm font-medium py-2 rounded-lg">Save</button>

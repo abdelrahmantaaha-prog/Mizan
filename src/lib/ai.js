@@ -2,21 +2,114 @@
 
    aiComplete(spec, cfg) -> string of model output text
      spec: { prompt, system?, image?: { media, data }, search?: boolean }
-     cfg:  { geminiKey?, geminiModel? }
+     cfg:  { geminiKey?, geminiModel? }   // geminiModel "auto" = resolve best Flash
 
    Routing: if a Gemini API key is configured (Settings page), calls the Gemini
-   API directly from the browser — Google's generativelanguage endpoint allows
-   browser CORS with key auth. Otherwise falls back to the Anthropic messages
+   API directly from the browser. Otherwise falls back to the Anthropic messages
    endpoint, which is auto-authenticated only inside Claude.ai artifacts.
-   The key never leaves the browser except to Google's API. */
+   The key never leaves the browser except to Google's API.
 
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
-export const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
+   Model resilience: Google renames and retires model IDs, so pinning one is a
+   time bomb. In "auto" mode we ask ListModels which Flash models this key can
+   actually use and pick the best; on model-not-found or quota errors we fall
+   through a candidate chain instead of failing the user. A manually chosen
+   model gets the same safety net. */
+
+export const DEFAULT_GEMINI_MODEL = "auto";
+export const GEMINI_MODELS = [
+  "auto",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+];
+
+/* static safety net when ListModels itself is unreachable — rolling aliases
+   first (Google keeps these pointed at the newest Flash), then pinned IDs */
+const FALLBACK_CHAIN = [
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+];
+
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
+let resolvedCache = null; // { key, candidates: [...] }
+let lastUsed = null;      // model name that served the most recent success
+
+export function lastGeminiModel() {
+  return lastUsed;
+}
+
+/* ask the API which text-capable Flash models this key can use, best first */
+async function listFlashModels(key) {
+  const res = await fetch(`${GEMINI_BASE}/models?key=${encodeURIComponent(key)}&pageSize=200`);
+  const data = await res.json();
+  if (data.error || !Array.isArray(data.models)) throw new Error((data.error && data.error.message) || "list-failed");
+  const usable = data.models
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => (m.name || "").replace(/^models\//, ""))
+    .filter((n) => n.includes("flash"));
+  // avoid special-purpose variants that can't do plain text well
+  const clean = usable.filter((n) => !/(image|audio|tts|live|native|exp|thinking|embedding)/.test(n));
+  const pool = clean.length ? clean : usable;
+  if (!pool.length) throw new Error("no-flash-models");
+  const score = (n) => {
+    let s = 0;
+    if (n === "gemini-flash-latest") s += 1000;      // rolling alias: always current
+    if (n === "gemini-flash-lite-latest") s += 900;
+    const v = n.match(/(\d+)\.(\d+)/);
+    if (v) s += parseInt(v[1], 10) * 100 + parseInt(v[2], 10) * 10;
+    if (!n.includes("lite")) s += 5;                  // full flash over lite at same version
+    if (n.endsWith("-latest")) s += 3;
+    return s;
+  };
+  return [...new Set(pool)].sort((a, b) => score(b) - score(a));
+}
+
+async function resolveCandidates(key) {
+  if (resolvedCache && resolvedCache.key === key) return resolvedCache.candidates;
+  let candidates;
+  try {
+    candidates = await listFlashModels(key);
+  } catch {
+    candidates = FALLBACK_CHAIN.slice();
+  }
+  resolvedCache = { key, candidates };
+  return candidates;
+}
+
+/* errors worth falling through on: bad/retired model IDs and quota exhaustion
+   (a lite model often still has free-tier quota when flash is exhausted) */
+function isFallthroughError(status, err) {
+  if (status === 404 || status === 429) return true;
+  const msg = ((err && err.message) || "").toLowerCase();
+  return /not found|not supported|deprecated|resource_exhausted|quota/.test(msg);
+}
+
+async function geminiRequest(model, body, key) {
+  const res = await fetch(
+    `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  const data = await res.json();
+  if (data.error) {
+    const e = new Error(data.error.message || "gemini-error");
+    e.status = res.status || data.error.code;
+    throw e;
+  }
+  const text = ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [])
+    .map((p) => p.text || "")
+    .join("");
+  if (!text) throw new Error("empty-response");
+  return text;
+}
 
 async function geminiCall({ prompt, system, image, search }, cfg) {
   const key = (cfg.geminiKey || "").trim();
   if (!key) throw new Error("no-key");
-  const model = cfg.geminiModel || DEFAULT_GEMINI_MODEL;
   const parts = [];
   if (image) parts.push({ inline_data: { mime_type: image.media, data: image.data } });
   parts.push({ text: prompt });
@@ -26,17 +119,29 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
   };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
   if (search) body.tools = [{ google_search: {} }];
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-  );
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "gemini-error");
-  const text = ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [])
-    .map((p) => p.text || "")
-    .join("");
-  if (!text) throw new Error("empty-response");
-  return text;
+
+  // build the try-order: chosen model first (unless auto), then resolved candidates
+  const resolved = await resolveCandidates(key);
+  const chosen = cfg.geminiModel && cfg.geminiModel !== "auto" ? cfg.geminiModel : null;
+  const order = [...new Set([...(chosen ? [chosen] : []), ...resolved, ...FALLBACK_CHAIN])].slice(0, 5);
+
+  let lastErr;
+  for (const model of order) {
+    try {
+      const text = await geminiRequest(model, body, key);
+      lastUsed = model;
+      return text;
+    } catch (e) {
+      lastErr = e;
+      if (!isFallthroughError(e.status, e)) throw e; // auth errors, bad requests: fail loud
+      // a resolved candidate that 404s means our cache is stale — drop it
+      if (resolvedCache && resolvedCache.key === key) {
+        resolvedCache = { key, candidates: resolvedCache.candidates.filter((m) => m !== model) };
+        if (!resolvedCache.candidates.length) resolvedCache = null;
+      }
+    }
+  }
+  throw lastErr || new Error("gemini-unavailable");
 }
 
 async function anthropicCall({ prompt, system, image, search }) {
@@ -78,11 +183,11 @@ export function aiProviderName(cfg = {}) {
   return cfg.geminiKey && cfg.geminiKey.trim() ? "Gemini" : "Claude";
 }
 
-/* quick key check for the Settings page */
+/* quick key check for the Settings page — reports the model that answered */
 export async function testGeminiKey(key, model) {
   try {
-    const text = await geminiCall({ prompt: "Reply with exactly: OK" }, { geminiKey: key, geminiModel: model });
-    return /ok/i.test(text) ? { ok: true } : { ok: true, note: "responded, unexpected text" };
+    const text = await geminiCall({ prompt: "Reply with exactly: OK" }, { geminiKey: key, geminiModel: model || "auto" });
+    return { ok: /ok/i.test(text), model: lastUsed, note: /ok/i.test(text) ? undefined : "responded, unexpected text" };
   } catch (e) {
     return { ok: false, error: e.message || "failed" };
   }
