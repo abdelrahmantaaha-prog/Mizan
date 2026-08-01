@@ -232,3 +232,30 @@ export function docSize(doc) {
   try { return JSON.stringify(doc).length; } catch { return Infinity; }
 }
 export const MAX_DOC_BYTES = 4 * 1024 * 1024;
+
+/* ---------- fingerprint ----------
+   "Has this document actually changed?" cannot be answered with
+   JSON.stringify: key order is an artefact of how an object was built, and the
+   server builds the merged document in a different order than migrate() does
+   on the way back in. Comparing raw JSON therefore reported a difference on
+   every single round trip, and the client pushed forever in a loop.
+
+   This serialises deterministically — keys sorted, undefined dropped — so two
+   documents with the same content always produce the same string. Array order
+   is still significant, which is correct: reordering the ledger is a real
+   change. */
+function stable(v) {
+  if (v === null || typeof v !== "object") {
+    const s = JSON.stringify(v);
+    return s === undefined ? "null" : s;
+  }
+  if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+  const keys = Object.keys(v).filter((k) => v[k] !== undefined).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
+}
+
+export function fingerprint(doc) {
+  try { return stable(doc); } catch { return null; }
+}
+
+export const sameDoc = (a, b) => fingerprint(a) === fingerprint(b);

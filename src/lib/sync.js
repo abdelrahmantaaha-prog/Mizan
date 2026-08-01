@@ -10,7 +10,7 @@
    only a top-level navigation can complete. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { mergeState } from "../../shared/model.js";
+import { mergeState, fingerprint, sameDoc } from "../../shared/model.js";
 
 const API = {
   me: "/api/me",
@@ -80,7 +80,15 @@ export async function disconnect() {
   return r.json();
 }
 
-const PUSH_DEBOUNCE = 2500;
+const PUSH_DEBOUNCE = 4000;
+
+/* Never sync out from under someone who is mid-edit. A push replaces the
+   document with the server's merged copy, and doing that while a dialog is
+   open makes the app feel like it is fighting you. Modals carry role="dialog",
+   so this is a reliable read of "the user is in the middle of something". */
+function userIsEditing() {
+  return typeof document !== "undefined" && !!document.querySelector('[role="dialog"]');
+}
 
 /* status: "unavailable" | "signed-out" | "idle" | "syncing" | "offline" | "error" */
 export function useSync({ state, adopt, loaded }) {
@@ -96,6 +104,7 @@ export function useSync({ state, adopt, loaded }) {
   const rev = useRef(0);
   const busy = useRef(false);
   const timer = useRef(null);
+  const deferred = useRef(false); // a sync was skipped because a dialog was open
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -122,11 +131,15 @@ export function useSync({ state, adopt, loaded }) {
 
   const reconcile = useCallback(async (reason) => {
     if (!capability.sync || !user || busy.current) return;
+    // a manual "Sync now" is an explicit request, so it overrides the guard
+    if (reason !== "manual" && userIsEditing()) { deferred.current = true; return; }
+
     busy.current = true;
+    deferred.current = false;
     setStatus("syncing");
     setError(null);
     try {
-      const local = stateRef.current;
+      const before = stateRef.current;
 
       // A pull first means a device that has been away adopts remote edits
       // before overwriting anything, even if the user never touches it.
@@ -137,22 +150,35 @@ export function useSync({ state, adopt, loaded }) {
         return;
       }
 
-      const merged = remote.doc ? mergeState(remote.doc, local) : local;
-      const mergedJson = JSON.stringify(merged);
-      const remoteJson = remote.doc ? JSON.stringify(remote.doc) : null;
+      const merged = remote.doc ? mergeState(remote.doc, before) : before;
 
+      let serverDoc;
       // Push only when the merge actually adds something the server lacks.
-      if (mergedJson !== remoteJson) {
+      if (!remote.doc || !sameDoc(merged, remote.doc)) {
         const saved = await pushDoc(merged);
         if (saved.signedOut) { setUser(null); setStatus("signed-out"); return; }
         rev.current = saved.rev;
-        settled.current = JSON.stringify(saved.doc);
-        adopt(saved.doc);
+        serverDoc = saved.doc;
       } else {
         rev.current = remote.rev || 0;
-        settled.current = remoteJson;
-        if (remoteJson !== JSON.stringify(local)) adopt(remote.doc);
+        serverDoc = remote.doc;
       }
+
+      // Whatever the server now holds is, by definition, settled.
+      settled.current = fingerprint(serverDoc);
+
+      /* The user may have logged something while the request was in flight.
+         Adopting the server's copy blindly would throw that edit away, so fold
+         the current state back in. The fingerprint above still reflects only
+         what the server has, which means the change detector will notice the
+         difference and push the straggler on the next tick. */
+      const current = stateRef.current;
+      const next = current === before ? serverDoc : mergeState(serverDoc, current);
+
+      // Only touch React state when something genuinely differs. Replacing the
+      // document with an identical copy re-renders the whole tree for nothing.
+      if (!sameDoc(next, current)) adopt(next);
+
       setLastSync(Date.now());
       setStatus("idle");
     } catch (e) {
@@ -173,15 +199,25 @@ export function useSync({ state, adopt, loaded }) {
     reconcile("boot");
   }, [loaded, capability.sync, user, reconcile]);
 
-  /* local edits schedule a push; the debounce keeps a burst of typing to one */
+  /* Local edits schedule a push; the debounce keeps a burst of typing to one.
+     The comparison is by fingerprint, not raw JSON — see shared/model.js. */
   useEffect(() => {
     if (!loaded || !capability.sync || !user) return;
-    const json = JSON.stringify(state);
-    if (settled.current === null || json === settled.current) return;
+    if (settled.current === null || fingerprint(state) === settled.current) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => reconcile("local-change"), PUSH_DEBOUNCE);
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [state, loaded, capability.sync, user, reconcile]);
+
+  /* Anything skipped while a dialog was open runs once it closes, so closing
+     an edit form is what commits it rather than an arbitrary timer. */
+  useEffect(() => {
+    if (!capability.sync || !user) return;
+    const id = setInterval(() => {
+      if (deferred.current && !userIsEditing()) reconcile("resumed");
+    }, 1500);
+    return () => clearInterval(id);
+  }, [capability.sync, user, reconcile]);
 
   /* coming back to the app, or back online, is when another device's edits
      are most likely to be waiting */
