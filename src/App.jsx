@@ -54,7 +54,7 @@ export default function Mizan() {
   const [state, setState] = useState(emptyState);
   const [prices, setPrices] = useState(SEED_PRICES);
   const [theme, setTheme] = useState("light");
-  const [settings, setSettings] = useState({ geminiKey: "", geminiModel: DEFAULT_GEMINI_MODEL });
+  const [settings, setSettings] = useState({ geminiKey: "", geminiModel: DEFAULT_GEMINI_MODEL, brokerUrl: "", brokerToken: "" });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tab, setTab] = useState("overview");
   const [fetching, setFetching] = useState(false);

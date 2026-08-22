@@ -36,6 +36,38 @@ const FALLBACK_CHAIN = [
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
+/* The shared key pool (keybroker): one address holding the keys every project
+   in this folder rotates, and the cooldowns they have already discovered. It
+   proxies Google's own API, so the only thing that changes is where a call is
+   posted and what goes in ?key= — the model chain, the search grounding and
+   the image parts below all work exactly as they did.
+
+   A build can carry defaults and Settings can override them. A browser app has
+   nowhere to hide a token, which is why each app holds its own, revocable on
+   its own, and why the key in Settings stays where it is: it is what answers
+   when the pool cannot be reached. */
+export function brokerFrom(cfg = {}) {
+  const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
+  const url = String(cfg.brokerUrl || env.VITE_BROKER_URL || "").trim().replace(/[/]+$/, "");
+  const token = String(cfg.brokerToken || env.VITE_BROKER_TOKEN || "").trim();
+  return url && token ? { url, token } : null;
+}
+
+/* Where this call goes, and what it presents as its key. */
+function route(cfg) {
+  const pool = cfg.__pool;
+  return pool
+    ? { base: pool.url + "/gemini/v1beta", key: pool.token }
+    : { base: GEMINI_BASE, key: (cfg.geminiKey || "").trim() };
+}
+
+/* A failure of the pool itself rather than a refusal from the model. A refusal
+   would be a refusal on the local key too; this is worth retrying there. */
+function poolIsDown(err) {
+  const msg = ((err && err.message) || "").toLowerCase();
+  return /failed to fetch|networkerror|load failed|broker_auth|broker_not_found|50[234]/.test(msg);
+}
+
 let resolvedCache = null; // { key, candidates: [...] }
 let lastUsed = null;      // model name that served the most recent success
 
@@ -44,8 +76,8 @@ export function lastGeminiModel() {
 }
 
 /* ask the API which text-capable Flash models this key can use, best first */
-async function listFlashModels(key) {
-  const res = await fetch(`${GEMINI_BASE}/models?key=${encodeURIComponent(key)}&pageSize=200`);
+async function listFlashModels(key, base = GEMINI_BASE) {
+  const res = await fetch(`${base}/models?key=${encodeURIComponent(key)}&pageSize=200`);
   const data = await res.json();
   if (data.error || !Array.isArray(data.models)) throw new Error((data.error && data.error.message) || "list-failed");
   const usable = data.models
@@ -69,11 +101,11 @@ async function listFlashModels(key) {
   return [...new Set(pool)].sort((a, b) => score(b) - score(a));
 }
 
-async function resolveCandidates(key) {
+async function resolveCandidates(key, base = GEMINI_BASE) {
   if (resolvedCache && resolvedCache.key === key) return resolvedCache.candidates;
   let candidates;
   try {
-    candidates = await listFlashModels(key);
+    candidates = await listFlashModels(key, base);
   } catch {
     candidates = FALLBACK_CHAIN.slice();
   }
@@ -89,9 +121,9 @@ function isFallthroughError(status, err) {
   return /not found|not supported|deprecated|resource_exhausted|quota/.test(msg);
 }
 
-async function geminiRequest(model, body, key) {
+async function geminiRequest(model, body, key, base = GEMINI_BASE) {
   const res = await fetch(
-    `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
   );
   const data = await res.json();
@@ -118,7 +150,7 @@ function isGroundingError(err) {
 }
 
 async function geminiCall({ prompt, system, image, search }, cfg) {
-  const key = (cfg.geminiKey || "").trim();
+  const { base, key } = route(cfg);
   if (!key) throw new Error("no-key");
   const parts = [];
   if (image) parts.push({ inline_data: { mime_type: image.media, data: image.data } });
@@ -134,7 +166,7 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
   };
 
   // build the try-order: chosen model first (unless auto), then resolved candidates
-  const resolved = await resolveCandidates(key);
+  const resolved = await resolveCandidates(key, base);
   const chosen = cfg.geminiModel && cfg.geminiModel !== "auto" ? cfg.geminiModel : null;
   const order = [...new Set([...(chosen ? [chosen] : []), ...resolved, ...FALLBACK_CHAIN])].slice(0, 5);
 
@@ -142,7 +174,7 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
   let lastErr;
   for (const model of order) {
     try {
-      const text = await geminiRequest(model, makeBody(searchOk), key);
+      const text = await geminiRequest(model, makeBody(searchOk), key, base);
       lastUsed = model;
       return text;
     } catch (e) {
@@ -151,7 +183,7 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
         // retry this same model tool-free before walking down the chain
         searchOk = false;
         try {
-          const text = await geminiRequest(model, makeBody(false), key);
+          const text = await geminiRequest(model, makeBody(false), key, base);
           lastUsed = model;
           return text;
         } catch (e2) {

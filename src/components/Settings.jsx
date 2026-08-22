@@ -114,6 +114,8 @@ export default function SettingsPage({
 }) {
   const toast = useToast();
   const [keyDraft, setKeyDraft] = useState(settings.geminiKey || "");
+  const [poolUrl, setPoolUrl] = useState(settings.brokerUrl || "");
+  const [poolToken, setPoolToken] = useState(settings.brokerToken || "");
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState(null);
@@ -125,8 +127,19 @@ export default function SettingsPage({
   const provider = aiProviderName(settings);
 
   function saveAI() {
-    setSettings((s) => ({ ...s, geminiKey: keyDraft.trim() }));
-    toast(keyDraft.trim() ? "Gemini key saved — AI features now use Gemini" : "Gemini key removed");
+    setSettings((s) => ({
+      ...s,
+      geminiKey: keyDraft.trim(),
+      brokerUrl: poolUrl.trim(),
+      brokerToken: poolToken.trim(),
+    }));
+    toast(
+      poolUrl.trim() && poolToken.trim()
+        ? "Saved — AI features use the shared key pool, your key is the fallback"
+        : keyDraft.trim()
+          ? "Gemini key saved — AI features now use Gemini"
+          : "Gemini key removed"
+    );
     setTestMsg(null);
   }
 
@@ -225,6 +238,30 @@ export default function SettingsPage({
                   <option key={m} value={m}>{m === "auto" ? "auto — latest Flash (recommended)" : m}</option>
                 ))}
               </select>
+            </Field>
+            <Field
+              label="Shared key pool (optional)"
+              hint="One address holding the keys every project in this folder rotates, with the cooldowns they have already found. Tried first; the key above answers when it cannot be reached."
+            >
+              <input
+                className={inputCls + " font-mono"}
+                value={poolUrl}
+                onChange={(e) => setPoolUrl(e.target.value)}
+                placeholder="https://keybroker.workers.dev"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label="Key pool token">
+              <input
+                type="password"
+                className={inputCls + " font-mono"}
+                value={poolToken}
+                onChange={(e) => setPoolToken(e.target.value)}
+                placeholder="kb_…"
+                autoComplete="off"
+                spellCheck={false}
+              />
             </Field>
             <div className="flex gap-2 pt-1">
               <button onClick={saveAI} className="flex-1 mz-btn-primary text-sm font-medium py-2 rounded-lg">Save</button>
