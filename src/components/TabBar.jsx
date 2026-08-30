@@ -1,16 +1,18 @@
 import React from "react";
-import { PieChart, Wallet, ArrowRightLeft, BarChart3, Coins } from "lucide-react";
-import { ACCENT, MONO_FONT } from "../theme.js";
+import { MONO_FONT } from "../theme.js";
 
 const ITEMS = [
-  ["overview", "Overview", PieChart],
-  ["accounts", "Accounts", Wallet],
-  ["activity", "Activity", ArrowRightLeft],
-  ["spending", "Spending", BarChart3],
-  ["prices", "Prices", Coins],
+  ["overview", "Home"],
+  ["accounts", "Accounts"],
+  ["activity", "Log"],
+  ["spending", "Spend"],
+  ["prices", "Prices"],
 ];
 
-/* Bottom tab bar: icons only, the active tab expanding into a labelled pill.
+/* Bottom nav, Tide version: five small labels, the active one at full
+   strength with a dot under it. No icons, no pill, no accent — a nav that
+   announces itself is a nav competing with the number above it.
+
    Arrow keys move between tabs so the bar is usable without a pointer. */
 export default function TabBar({ tab, setTab }) {
   function onKeyDown(e) {
@@ -25,8 +27,8 @@ export default function TabBar({ tab, setTab }) {
       aria-label="Sections"
       onKeyDown={onKeyDown}
     >
-      <div className="max-w-3xl mx-auto px-3 py-1.5 flex items-center justify-between" style={{ paddingBottom: "max(6px, env(safe-area-inset-bottom))" }}>
-        {ITEMS.map(([k, label, Icon]) => {
+      <div className="max-w-3xl mx-auto px-4 pt-3 pb-2 flex items-center justify-between" style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
+        {ITEMS.map(([k, label]) => {
           const active = tab === k;
           return (
             <button
@@ -36,11 +38,22 @@ export default function TabBar({ tab, setTab }) {
               aria-label={label}
               aria-current={active ? "page" : undefined}
               tabIndex={active ? 0 : -1}
-              className="mz-tabbtn flex items-center gap-1.5 rounded-full px-3 py-1.5"
-              style={active ? { background: ACCENT + "14", color: ACCENT } : { color: "var(--muted)" }}
+              className="mz-tabbtn relative px-3 py-2 text-[10px] uppercase"
+              style={{
+                fontFamily: MONO_FONT,
+                fontWeight: 600,
+                letterSpacing: "0.16em",
+                color: active ? "var(--ink)" : "var(--faint)",
+                opacity: active ? 1 : 0.75,
+              }}
             >
-              <Icon size={18} strokeWidth={active ? 2.3 : 1.9} className="mz-tabicon" />
-              {active && <span className="mz-tablabel text-[11px] font-semibold" style={{ fontFamily: MONO_FONT }}>{label}</span>}
+              {label}
+              {active && (
+                <span
+                  className="mz-tablabel absolute left-1/2 -translate-x-1/2 rounded-full"
+                  style={{ bottom: "1px", width: "3px", height: "3px", background: "currentColor" }}
+                />
+              )}
             </button>
           );
         })}

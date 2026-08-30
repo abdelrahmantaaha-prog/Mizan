@@ -11,26 +11,33 @@ export const useToast = () => useContext(ToastCtx);
 export const useAI = () => useContext(AICtx);
 
 export const inputCls =
-  "w-full mz-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors";
+  "w-full mz-input rounded-xl px-3.5 py-2.5 text-sm font-light focus:outline-none transition-colors";
 
+/* A well. Not a card — no border, no shadow, nothing detached from the field
+   behind it; just a slightly lighter patch of the same ground. */
 export function Card({ children, className = "", ...rest }) {
   return (
-    <div className={"mz-card rounded-2xl p-4 " + className} style={{ boxShadow: "0 1px 2px rgba(20,35,72,0.05)" }} {...rest}>
+    <div className={"mz-card rounded-[20px] p-4 " + className} {...rest}>
       {children}
     </div>
   );
 }
 
+/* The 10px label at 0.2em is the only place weight goes up in this system. */
 export function CardTitle({ children }) {
-  return <div className="text-[11px] uppercase tracking-widest mz-tx2" style={{ fontFamily: MONO_FONT }}>{children}</div>;
+  return (
+    <div className="text-[10px] uppercase mz-tx2" style={{ fontFamily: MONO_FONT, fontWeight: 600, letterSpacing: "0.2em" }}>
+      {children}
+    </div>
+  );
 }
 
 export function Field({ label, hint, children }) {
   return (
     <label className="block">
-      <span className="text-[11px] uppercase tracking-wide mz-tx2" style={{ fontFamily: MONO_FONT }}>{label}</span>
-      <div className="mt-1">{children}</div>
-      {hint && <span className="text-[11px] mz-tx3 mt-1 block">{hint}</span>}
+      <span className="text-[10px] uppercase mz-tx2" style={{ fontFamily: MONO_FONT, fontWeight: 600, letterSpacing: "0.18em" }}>{label}</span>
+      <div className="mt-1.5">{children}</div>
+      {hint && <span className="text-[11px] mz-tx3 mt-1 block font-light">{hint}</span>}
     </label>
   );
 }
@@ -79,14 +86,14 @@ export function NumberInput({ value, onChange, className = "", allowEmpty = true
 
 export function Segmented({ options, value, onChange, className = "" }) {
   return (
-    <div className={"flex gap-1 mz-sub rounded-lg p-1 " + className} role="tablist">
+    <div className={"flex gap-1 mz-sub rounded-full p-1 " + className} role="tablist">
       {options.map(([k, l]) => (
         <button
           key={k}
           role="tab"
           aria-selected={value === k}
           onClick={() => onChange(k)}
-          className={"flex-1 text-xs font-medium py-1.5 rounded-md transition-colors " + (value === k ? "mz-segon shadow-sm" : "mz-tx2 mz-hovi")}
+          className={"flex-1 text-xs py-1.5 rounded-full transition-colors " + (value === k ? "mz-btn-primary" : "mz-tx2 mz-hovi font-medium")}
         >
           {l}
         </button>
@@ -151,8 +158,10 @@ export function Modal({ title, onClose, children, wide = false }) {
       <div
         ref={panel}
         tabIndex={-1}
-        className={"mz-modal relative w-full max-h-[85vh] overflow-y-auto rounded-2xl p-4 " + (wide ? "max-w-lg" : "max-w-md")}
-        style={{ background: "var(--card)", border: "1px solid var(--line)", boxShadow: "0 24px 60px rgba(8,14,28,0.35)" }}
+        className={"mz-modal relative w-full max-h-[85vh] overflow-y-auto rounded-[26px] p-5 " + (wide ? "max-w-lg" : "max-w-md")}
+        /* the sheet carries the field with it rather than being a pale panel
+           punched through it — same ground, lifted one step */
+        style={{ background: "var(--bg-solid)", backgroundImage: "var(--bg)", border: "1px solid var(--line)", color: "var(--ink)" }}
       >
         <div className="flex items-center justify-between mb-3">
           <div id={titleId}><CardTitle>{title}</CardTitle></div>
@@ -175,14 +184,18 @@ export function ConfirmButton({ label, confirmLabel, onConfirm, className = "", 
   }, [armed]);
   if (!armed) {
     return (
-      <button onClick={() => setArmed(true)} className={className || (danger ? "text-sm text-rose-600 font-medium" : "text-sm mz-tx2")}>
+      <button onClick={() => setArmed(true)} className={className || (danger ? "text-sm mz-txrose font-medium" : "text-sm mz-tx2")}>
         {label}
       </button>
     );
   }
   return (
-    <span className="flex gap-2">
-      <button onClick={() => { setArmed(false); onConfirm(); }} className="flex-1 bg-rose-600 text-white text-sm font-medium py-2 px-3 rounded-lg">
+    <span className="flex gap-2 items-center">
+      <button
+        onClick={() => { setArmed(false); onConfirm(); }}
+        className="flex-1 text-sm font-medium py-2.5 px-3 rounded-full"
+        style={{ background: "var(--flow-out)", color: "var(--bg-solid)" }}
+      >
         {confirmLabel || "Yes, do it"}
       </button>
       <button onClick={() => setArmed(false)} className="px-4 text-sm mz-tx2">Cancel</button>
@@ -241,9 +254,9 @@ export function EmptyNote({ children }) {
 export function Pill({ children, color = ACCENT, title }) {
   return (
     <span
-      className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full whitespace-nowrap"
+      className="text-[10px] uppercase px-2.5 py-1 rounded-full whitespace-nowrap"
       title={title}
-      style={{ fontFamily: MONO_FONT, color, background: color + "1A", border: `1px solid ${color}40` }}
+      style={{ fontFamily: MONO_FONT, fontWeight: 600, letterSpacing: "0.16em", color, background: color + "1F" }}
     >
       {children}
     </span>

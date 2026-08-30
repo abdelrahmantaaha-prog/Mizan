@@ -5,7 +5,7 @@ import { Card, CardTitle, Field, NumberInput, useToast } from "./ui.jsx";
 import { fmtNum, fmtPct, timeAgo, dayLabel } from "../lib/format.js";
 import { sourceBadge } from "../lib/prices.js";
 import { LIQUID_CLASSES, touchScalar } from "../../shared/model.js";
-import { CLASS_COLOR, CLASS_ICON, MONO_FONT, AMBER, TEAL } from "../theme.js";
+import { CLASS_COLOR, MONO_FONT } from "../theme.js";
 
 /* A price series is the only way to tell whether gold moved or your holding
    did — the account card shows P&L, but not what drove it. */
@@ -27,7 +27,7 @@ function PriceHistory({ series }) {
   const W = 600, H = 56, PAD = 4;
   const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * W).toFixed(1)},${(H - PAD - ((v - min) / span) * (H - PAD * 2)).toFixed(1)}`);
   const chg = vals[0] ? ((vals[vals.length - 1] - vals[0]) / vals[0]) * 100 : 0;
-  const color = chg >= 0 ? CLASS_COLOR.Gold : "#F4506B";
+  const color = chg >= 0 ? CLASS_COLOR.Gold : "var(--flow-out)";
 
   return (
     <Card>
@@ -119,11 +119,11 @@ export default function PricesTab({ prices, setPrices, fetching, onRefresh, onRe
           <NumberInput value={silver} onChange={setSilver} placeholder="leave blank to keep the fetched value" />
         </Field>
         <button onClick={applyManual} className="w-full mz-btn-primary text-sm font-medium py-2 rounded-lg mt-2">Apply prices</button>
-        <div className="grid grid-cols-4 gap-2 mt-3">
+        <div className="flex justify-between mt-4">
           {[24, 21, 18, 14].map((k) => (
-            <div key={k} className="mz-sub rounded-lg p-2 text-center border mz-bd">
-              <div className="text-[10px] font-mono mz-tx3">{k}K</div>
-              <div className="font-mono tabular-nums text-sm font-semibold" style={{ color: CLASS_COLOR.Gold }}>
+            <div key={k}>
+              <div className="text-[10px] uppercase mz-tx3" style={{ fontFamily: MONO_FONT, fontWeight: 600, letterSpacing: "0.16em" }}>{k}K</div>
+              <div className="tabular-nums text-lg mt-1" style={{ fontWeight: 200, letterSpacing: "-0.02em" }}>
                 {fmtNum((Number(g24) || 0) * (k / 24), 0)}
               </div>
             </div>
@@ -136,17 +136,14 @@ export default function PricesTab({ prices, setPrices, fetching, onRefresh, onRe
       <Card>
         <div className="flex items-center justify-between">
           <CardTitle>Target allocation</CardTitle>
-          <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: MONO_FONT, color: "var(--muted)" }}>liquid only</span>
+          <span className="text-[11px] font-light mz-tx3">liquid only</span>
         </div>
         <p className="text-[12px] mz-tx2 mt-1">Targets apply to your liquid portfolio. Illiquid assets count toward net worth but aren't rebalanced.</p>
         <div className="space-y-2 mt-3">
           {LIQUID_CLASSES.map((c) => {
-            const Icon = CLASS_ICON[c];
             return (
               <div key={c} className="flex items-center gap-3">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg shrink-0" style={{ background: CLASS_COLOR[c] + "1F", color: CLASS_COLOR[c] }}>
-                  <Icon size={13} strokeWidth={2} />
-                </span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: CLASS_COLOR[c] }} />
                 <span className="text-sm flex-1">{c}</span>
                 <NumberInput
                   className="w-20 font-mono text-right mz-input rounded-lg px-2 py-1 text-sm"
@@ -158,7 +155,7 @@ export default function PricesTab({ prices, setPrices, fetching, onRefresh, onRe
               </div>
             );
           })}
-          <div className="text-[11px] font-mono text-right" style={{ color: tgtSum === 100 ? TEAL : AMBER }}>
+          <div className="text-[11px] font-mono text-right" style={{ color: tgtSum === 100 ? "var(--muted)" : "var(--flow-warn)" }}>
             sums to {tgtSum}%{tgtSum === 100 ? "" : " — rebalance advice needs exactly 100%"}
           </div>
         </div>

@@ -5,7 +5,6 @@
    into <body>, outside the app root — still resolves every variable. */
 
 import React, { useEffect } from "react";
-import { ACCENT, ACCENT_DIM } from "../theme.js";
 
 export default function FontLoader() {
   useEffect(() => {
@@ -25,34 +24,60 @@ export default function FontLoader() {
     const link = document.createElement("link");
     link.id = "mizan-fonts";
     link.rel = "stylesheet";
-    link.href =
-      "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap";
+    // one family, five weights: 200 carries every figure, 600 the small caps
+    link.href = "https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600&display=swap";
     document.head.appendChild(link);
   }, []);
 
   return (
     <style>{`
       /* ---- theme tokens ----
-         --muted and --faint are the small mono labels the app leans on heavily.
-         They used to sit around 3:1 against the card, which fails WCAG AA at
-         the 10–11px they are rendered at; both are darkened in light mode and
-         lightened in dark mode to clear 4.5:1. */
+         Tide has one ground and no cards. --bg is therefore a gradient rather
+         than a colour, and --card is a translucent well that lets the field
+         show through instead of an opaque panel sitting on top of it.
+
+         --muted and --faint carry the small labels the app leans on heavily,
+         so both are set against the *lightest* end of their own field rather
+         than against a flat colour — a token that only clears 4.5:1 at the top
+         of the gradient fails halfway down the page. */
       :root {
-        --bg: #EEF3FB; --card: #FFFFFF; --line: #DCE4F1;
-        --ink: #1B2740; --muted: #5B6A82; --faint: #647184;
-        --sub: #F1F5FA; --sub2: #E3EAF4;
+        --bg: linear-gradient(168deg, #F4F8F8 0%, #E9F1F2 55%, #DDEBEB 100%);
+        --bg-solid: #EEF4F4;
+        --card: rgba(12,31,51,0.055); --line: rgba(12,31,51,0.11);
+        --ink: #0C1F33; --muted: #46596B; --faint: #566A7C;
+        --sub: rgba(12,31,51,0.05); --sub2: rgba(12,31,51,0.10);
+        --btn-bg: #0C1F33; --btn-fg: #F2F6F7;
+        --flow-in: #0E7C68; --flow-out: #B9543A; --flow-warn: #96671A;
+        --well-hi: rgba(12,31,51,0.09);
         /* font stacks as variables so components can reference them from
            inline styles without importing the theme module */
-        --mz-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-        --mz-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
-        --mz-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+        --mz-display: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+        --mz-body: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+        --mz-mono: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+        /* Tailwind resolves font-sans/font-mono through these, so every
+           className="font-mono" in the app follows the type system too */
+        --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+        --font-mono: 'Manrope', ui-sans-serif, system-ui, sans-serif;
       }
       :root[data-theme="dark"] {
-        --bg: #0B1424; --card: #121F38; --line: #243756;
-        --ink: #E7EEFB; --muted: #A3B2CE; --faint: #8394B4;
-        --sub: #1A2A4A; --sub2: #24365E;
+        --bg: linear-gradient(168deg, #0C1F33 0%, #123B4A 56%, #17565A 100%);
+        --bg-solid: #0C1F33;
+        --card: rgba(255,255,255,0.07); --line: rgba(234,244,244,0.13);
+        --ink: #EAF4F4; --muted: #B9CFD1; --faint: #9BB4B7;
+        --sub: rgba(255,255,255,0.06); --sub2: rgba(255,255,255,0.12);
+        --btn-bg: #EAF4F4; --btn-fg: #0C1F33;
+        --flow-in: #7FE0C4; --flow-out: #F2A18C; --flow-warn: #F5C77E;
+        --well-hi: rgba(255,255,255,0.11);
       }
-      .mz-root { background: var(--bg); color: var(--ink); }
+      html { background: var(--bg-solid); }
+      /* the field is painted once, over the whole scroll height — it is the
+         only surface in the design, so nothing may tile or repeat it */
+      .mz-root {
+        background: var(--bg); background-attachment: scroll; color: var(--ink);
+        font-weight: 300; letter-spacing: 0.002em;
+      }
+      /* figures are the one thing that carries weight downward, not upward */
+      .tabular-nums, .mz-fig { font-variant-numeric: tabular-nums; }
 
       /* ---- var-driven utilities (theme both ways) ---- */
       .mz-tx1 { color: var(--ink); } .mz-tx2 { color: var(--muted); } .mz-tx3 { color: var(--faint); }
@@ -64,36 +89,47 @@ export default function FontLoader() {
       .mz-hovbd:hover { border-color: var(--muted); }
       .mz-input { background: var(--card); border: 1px solid var(--line); color: var(--ink); }
       .mz-input::placeholder { color: var(--faint); }
-      .mz-note-rose  { background: rgba(225,29,72,0.08);  border-color: rgba(225,29,72,0.28); }
-      .mz-note-amber { background: rgba(217,119,6,0.10);  border-color: rgba(217,119,6,0.30); }
-      .mz-note-teal  { background: rgba(13,148,136,0.10); border-color: rgba(13,148,136,0.30); }
-      .mz-note-blue  { background: rgba(59,125,255,0.10); border-color: rgba(59,125,255,0.30); }
-      .mz-note-mut   { background: var(--sub); border-color: var(--line); }
-      .mz-txblue { color: #2563EB; } :root[data-theme="dark"] .mz-txblue { color: #7EA6FF; }
-      .mz-txteal { color: #0F766E; } :root[data-theme="dark"] .mz-txteal { color: #2DD4BF; }
-      .mz-txamber { color: #B45309; } :root[data-theme="dark"] .mz-txamber { color: #FBBF24; }
-      .mz-txamber2 { color: #78350F; } :root[data-theme="dark"] .mz-txamber2 { color: #FDE68A; }
-      .mz-txrose { color: #E11D48; } :root[data-theme="dark"] .mz-txrose { color: #FB7185; }
+      /* Notes are wells with a tint, not bordered alert boxes: the border is
+         the thing Tide removes everywhere else, so it cannot come back here. */
+      .mz-note-rose  { background: color-mix(in srgb, var(--flow-out) 14%, transparent);  border-color: transparent; }
+      .mz-note-amber { background: color-mix(in srgb, var(--flow-warn) 14%, transparent); border-color: transparent; }
+      .mz-note-teal  { background: color-mix(in srgb, var(--flow-in) 14%, transparent);   border-color: transparent; }
+      .mz-note-blue  { background: var(--well-hi); border-color: transparent; }
+      .mz-note-mut   { background: var(--sub); border-color: transparent; }
+      .mz-txblue { color: var(--ink); }
+      .mz-txteal { color: var(--flow-in); }
+      .mz-txamber { color: var(--flow-warn); }
+      .mz-txamber2 { color: var(--ink); }
+      .mz-txrose { color: var(--flow-out); }
 
       /* ---- keyboard focus ----
          Only inputs used to show focus, so anyone navigating by keyboard lost
          the cursor the moment they tabbed onto a button or a tab. */
-      :focus-visible { outline: 2px solid ${ACCENT}; outline-offset: 2px; border-radius: 0.4rem; }
+      :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 999px; }
       .mz-root button:focus:not(:focus-visible) { outline: none; }
 
-      .mz-btn-primary { background: ${ACCENT}; color: #FFFFFF; transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease; box-shadow: 0 1px 2px rgba(12,23,48,0.10); }
-      .mz-btn-primary:hover:not(:disabled) { background: ${ACCENT_DIM}; box-shadow: 0 4px 14px rgba(59,125,255,0.28); }
+      /* Every control is a pill. The filled one is the ink itself — one per
+         screen, the thing to do here; everything else is an outline. */
+      .mz-btn-primary {
+        background: var(--btn-bg); color: var(--btn-fg); border-radius: 999px;
+        font-weight: 500; letter-spacing: 0.005em;
+        transition: opacity 0.15s ease, transform 0.12s ease;
+      }
+      .mz-btn-primary:hover:not(:disabled) { opacity: 0.88; }
       .mz-btn-primary:active:not(:disabled) { transform: translateY(1px); }
-      .mz-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-      .mz-btn-ghost { border: 1px solid var(--line); color: var(--muted); transition: border-color .15s ease, color .15s ease; }
+      .mz-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+      .mz-btn-ghost {
+        border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+        font-weight: 500; transition: border-color .15s ease, color .15s ease;
+      }
       .mz-btn-ghost:hover:not(:disabled) { border-color: var(--muted); color: var(--ink); }
 
       /* padded icon buttons: ≥40px hit area */
       .mz-iconbtn { padding: 0.55rem; border-radius: 0.6rem; line-height: 0; transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease; }
       .mz-iconbtn:hover { background: var(--sub); }
       .mz-iconbtn:active { transform: scale(0.9); }
-      .mz-hovrose:hover { color: #E11D48; }
-      .mz-hovblue:hover { color: ${ACCENT}; }
+      .mz-hovrose:hover { color: var(--flow-out); }
+      .mz-hovblue:hover { color: var(--ink); }
 
       @keyframes mzRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
       @keyframes mzFade { from { opacity: 0; } to { opacity: 1; } }
@@ -117,32 +153,34 @@ export default function FontLoader() {
       .mz-tabview > *:nth-child(5){ animation-delay: .20s; }
       .mz-tabview > *:nth-child(n+6){ animation-delay: .24s; }
 
-      .mz-card { background: var(--card); border: 1px solid var(--line); transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease; }
-      .mz-card:hover { box-shadow: 0 10px 30px rgba(20,35,72,0.10); transform: translateY(-1px); border-color: ${ACCENT}33; }
+      /* A well, not a card: no border, no shadow, no lift. It is a slightly
+         lighter patch of the same field, and it must never look detached. */
+      .mz-card { background: var(--card); border: 0; transition: background 0.2s ease; }
+      .mz-card:hover { background: var(--well-hi); }
 
       .mz-bar { transition: width 0.6s cubic-bezier(.22,1,.36,1); transform-origin: left; animation: mzGrowX 0.7s cubic-bezier(.22,1,.36,1) both; }
 
       /* sticky date headers in the activity list */
-      .mz-daybar { position: sticky; top: 0; z-index: 1; background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(6px); }
+      .mz-daybar { position: sticky; top: 0; z-index: 1; background: var(--bg-solid); }
 
-      /* bottom tab bar */
-      .mz-bottombar { background: color-mix(in srgb, var(--card) 84%, transparent); border-top: 1px solid var(--line); }
+      /* bottom nav: a hairline over the field, not a bar sitting on it */
+      .mz-bottombar { background: color-mix(in srgb, var(--bg-solid) 78%, transparent); border-top: 1px solid var(--line); }
       .mz-tabbtn { transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease; }
       .mz-tabbtn:active { transform: scale(0.92); }
       .mz-tabicon { transition: transform 0.25s cubic-bezier(.34,1.56,.64,1); }
       .mz-tabbtn[data-active="true"] .mz-tabicon { transform: scale(1.05); }
       .mz-tablabel { animation: mzFade 0.25s ease both; }
 
-      /* floating quick-add */
-      .mz-fab { width: 52px; height: 52px; border-radius: 9999px; background: ${ACCENT}; color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(59,125,255,0.42); transition: transform 0.15s ease, box-shadow 0.2s ease; }
-      .mz-fab:hover { box-shadow: 0 10px 30px rgba(59,125,255,0.55); }
+      /* floating quick-add — the solid pill, in its most literal form */
+      .mz-fab { width: 52px; height: 52px; border-radius: 9999px; background: var(--btn-bg); color: var(--btn-fg); display: flex; align-items: center; justify-content: center; transition: transform 0.15s ease, opacity 0.2s ease; }
+      .mz-fab:hover { opacity: 0.88; }
       .mz-fab:active { transform: scale(0.9); }
 
       /* toasts */
       .mz-toast { animation: mzRise 0.28s cubic-bezier(.22,1,.36,1) both; }
 
-      /* modal overlay */
-      .mz-backdrop { background: rgba(8,14,28,0.55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: mzFade 0.2s ease both; }
+      /* modal overlay — a sheet rising out of the field it belongs to */
+      .mz-backdrop { background: rgba(5,17,28,0.62); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); animation: mzFade 0.2s ease both; }
       .mz-modal { animation: mzSheet 0.32s cubic-bezier(.22,1,.36,1) both; }
       @keyframes mzSheet { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 

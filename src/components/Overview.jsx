@@ -8,63 +8,7 @@ import { karatPrice } from "../lib/valuation.js";
 import { sourceBadge } from "../lib/prices.js";
 import { zakatStatus } from "../lib/zakat.js";
 import { LIQUID_CLASSES } from "../../shared/model.js";
-import { ACCENT, CLASS_COLOR, CLASS_ICON, INK, MONO_FONT, DISPLAY_FONT, TEAL, AMBER } from "../theme.js";
-
-/* ---------- allocation donut ---------- */
-function AllocationDonut({ byClass, liquidTotal, active, onHover }) {
-  const [drawn, setDrawn] = useState(false);
-  useEffect(() => {
-    if (typeof requestAnimationFrame === "undefined") { setDrawn(true); return; }
-    // rAF is paused in a tab that isn't compositing, which would leave the
-    // donut permanently undrawn; the timer makes the draw unconditional
-    const raf = requestAnimationFrame(() => setDrawn(true));
-    const settle = setTimeout(() => setDrawn(true), 300);
-    return () => { cancelAnimationFrame(raf); clearTimeout(settle); };
-  }, []);
-
-  const R = 40, C = 2 * Math.PI * R;
-  const base = liquidTotal || 1;
-  let acc = 0;
-  const segs = LIQUID_CLASSES.map((c) => {
-    const frac = (byClass[c] || 0) / base;
-    const seg = { c, frac, offset: acc };
-    acc += frac;
-    return seg;
-  }).filter((s) => s.frac > 0.001);
-
-  const shown = active && byClass[active] != null ? active : null;
-
-  return (
-    <div className="relative w-[132px] h-[132px] shrink-0 mx-auto sm:mx-0">
-      <svg viewBox="0 0 100 100" className="w-full h-full">
-        <g transform="rotate(-90 50 50)">
-          <circle cx="50" cy="50" r={R} fill="none" stroke="var(--sub2)" strokeWidth="11" />
-          {segs.map((s) => (
-            <circle
-              key={s.c}
-              cx="50" cy="50" r={R} fill="none"
-              stroke={CLASS_COLOR[s.c]}
-              strokeWidth={shown === s.c ? 13 : 11}
-              strokeLinecap="butt"
-              strokeDasharray={drawn ? `${Math.max(s.frac * C - 1.5, 0.5)} ${C}` : `0.5 ${C}`}
-              strokeDashoffset={-s.offset * C}
-              opacity={shown && shown !== s.c ? 0.4 : 1}
-              onMouseEnter={() => onHover && onHover(s.c)}
-              onMouseLeave={() => onHover && onHover(null)}
-              style={{ transition: "stroke-dasharray 0.9s cubic-bezier(.22,1,.36,1), opacity .2s ease, stroke-width .2s ease", cursor: "pointer" }}
-            />
-          ))}
-        </g>
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-[9px] uppercase tracking-widest mz-tx2" style={{ fontFamily: MONO_FONT }}>{shown || "liquid"}</span>
-        <span className="tabular-nums text-[13px] font-semibold mz-tx1" style={{ fontFamily: MONO_FONT }}>
-          {fmtEGPShort(shown ? byClass[shown] : liquidTotal)}
-        </span>
-      </div>
-    </div>
-  );
-}
+import { CLASS_COLOR, MONO_FONT, DISPLAY_FONT, TEAL } from "../theme.js";
 
 /* ---------- rebalance: turn drift into concrete EGP moves ---------- */
 function RebalanceCard({ byClass, targets, liquidTotal }) {
@@ -92,27 +36,24 @@ function RebalanceCard({ byClass, targets, liquidTotal }) {
         <CardTitle>Rebalance</CardTitle>
         <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: MONO_FONT, color: "var(--muted)" }}>to hit targets</span>
       </div>
-      <div className="space-y-2 mt-3">
+      <div className="mt-3 divide-y mz-dv">
         {moves
           .filter((m) => Math.abs(m.delta) >= liquidTotal * 0.005)
           .sort((a, b) => b.delta - a.delta)
           .map(({ c, delta }) => {
-            const Icon = CLASS_ICON[c];
             const buy = delta > 0;
             return (
-              <div key={c} className="flex items-center gap-2.5">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg shrink-0" style={{ background: CLASS_COLOR[c] + "1F", color: CLASS_COLOR[c] }}>
-                  <Icon size={13} strokeWidth={2} />
-                </span>
-                <span className="text-sm flex-1">{c}</span>
-                <span className="font-mono tabular-nums text-sm" style={{ color: buy ? TEAL : AMBER }}>
+              <div key={c} className="flex items-center gap-3 py-2.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: CLASS_COLOR[c] }} />
+                <span className="text-sm flex-1 min-w-0 truncate">{c}</span>
+                <span className="tabular-nums text-sm" style={{ color: buy ? "var(--flow-in)" : "var(--flow-warn)" }}>
                   {buy ? "add " : "trim "}{fmtEGP(Math.abs(delta))}
                 </span>
               </div>
             );
           })}
       </div>
-      <p className="text-[11px] font-mono mz-tx3 mt-2">amounts that bring each class to its target share of your liquid portfolio</p>
+      <p className="text-[11px] font-light mz-tx3 mt-2.5">amounts that bring each class to its target share of your liquid portfolio</p>
     </Card>
   );
 }
@@ -126,47 +67,58 @@ function ZakatCard({ liquidTotal, illiquidTotal, liabilities, prices, zakat, onZ
 
   return (
     <Card>
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-2 min-w-0">
-          <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg shrink-0" style={{ background: TEAL + "1F", color: TEAL }}>
-            <HandHeart size={15} strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <div className="text-sm font-medium">Zakat</div>
-            <div className="text-[11px] font-mono mz-tx3 truncate">
-              nisab = {st.nisab.grams}g {st.nisab.metal} = {fmtEGPShort(st.nisab.value)}
-            </div>
-          </div>
+      {/* The hawl is a year going round, so it is drawn as one. The bar it
+          replaces read as progress toward a goal; this reads as a clock, which
+          is what it is — and it puts the whole status in one glance: how far
+          round, and what is owed when it closes. */}
+      <div className="flex items-center gap-4">
+        <span className="relative shrink-0" style={{ width: 52, height: 52 }}>
+          <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
+            <circle cx="26" cy="26" r="22" fill="none" stroke="var(--sub2)" strokeWidth="3" />
+            {st.above && st.hawlStart && (
+              <circle
+                cx="26" cy="26" r="22" fill="none"
+                stroke={st.hawlComplete ? "var(--flow-in)" : "var(--ink)"}
+                strokeWidth="3" strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 22}
+                strokeDashoffset={(1 - Math.min(1, st.progress)) * 2 * Math.PI * 22}
+                transform="rotate(-90 26 26)"
+                style={{ transition: "stroke-dashoffset 0.8s cubic-bezier(.22,1,.36,1)" }}
+              />
+            )}
+          </svg>
+          <HandHeart
+            size={16}
+            strokeWidth={1.8}
+            className="absolute inset-0 m-auto mz-tx3"
+            style={{ width: 16, height: 16 }}
+          />
         </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm">
+            Zakat{st.above ? "" : " · below nisab"}
+          </div>
+          <div className="text-[11px] font-light mz-tx3 mt-0.5">
+            {st.above && st.hawlStart
+              ? st.hawlComplete
+                ? "the year is complete — due now"
+                : `${st.daysLeft} days of the hawl left · due ${st.dueDate}`
+              : `nisab ${st.nisab.grams}g ${st.nisab.metal} = ${fmtEGPShort(st.nisab.value)}`}
+          </div>
+        </div>
         <div className="text-right shrink-0">
           {st.above ? (
             <>
-              <div className="font-mono tabular-nums text-sm" style={{ color: TEAL }}>{fmtEGP(st.due)}</div>
-              <div className="text-[10px] font-mono mz-tx3">2.5% of {fmtEGPShort(st.base)}</div>
+              <div className="tabular-nums text-sm">{fmtEGP(st.due)}</div>
+              <div className="text-[11px] font-light mz-tx3">2.5% of {fmtEGPShort(st.base)}</div>
             </>
           ) : (
-            <>
-              <div className="font-mono tabular-nums text-sm mz-tx2">below nisab</div>
-              <div className="text-[10px] font-mono mz-tx3">{fmtEGPShort(st.base)} / {fmtEGPShort(st.nisab.value)}</div>
-            </>
+            <div className="text-[11px] font-light mz-tx3 tabular-nums">
+              {fmtEGPShort(st.base)} / {fmtEGPShort(st.nisab.value)}
+            </div>
           )}
         </div>
       </div>
-
-      {/* hawl clock — zakat is owed on wealth held above nisab for a lunar year */}
-      {st.above && st.hawlStart && (
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-[11px] font-mono mz-tx3 mb-1">
-            <span>hawl since {st.hawlStart}</span>
-            <span style={{ color: st.hawlComplete ? TEAL : "var(--faint)" }}>
-              {st.hawlComplete ? "year complete — due now" : `${st.daysLeft}d to ${st.dueDate}`}
-            </span>
-          </div>
-          <div className="h-1.5 mz-sub2 rounded-full overflow-hidden">
-            <div className="mz-bar h-1.5 rounded-full" style={{ width: (st.progress * 100).toFixed(1) + "%", background: st.hawlComplete ? TEAL : ACCENT }} />
-          </div>
-        </div>
-      )}
 
       {st.silverUnavailable && (
         <div className="mt-2 text-[11px] mz-tx2 border mz-note-amber rounded-lg p-2">
@@ -237,26 +189,28 @@ export function GoldCard({ prices, fetching, onRefresh, onRefreshWeb, webBusy, w
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-2 mt-3">
+      {/* four figures on one line, no tiles: they are the same quantity at
+          four purities, and boxing each one implies they are four things */}
+      <div className="flex justify-between mt-4">
         {karats.map((k) => (
-          <div key={k} className="mz-sub rounded-lg p-2 text-center border mz-bd">
-            <div className="text-[10px] font-mono mz-tx3">{k}K</div>
-            <div className="font-mono tabular-nums text-sm font-semibold" style={{ color: CLASS_COLOR.Gold }}>
+          <div key={k}>
+            <div className="text-[10px] uppercase mz-tx3" style={{ fontFamily: MONO_FONT, fontWeight: 600, letterSpacing: "0.16em" }}>{k}K</div>
+            <div className="tabular-nums text-lg mt-1" style={{ fontWeight: 200, letterSpacing: "-0.02em" }}>
               {fmtNum(karatPrice(prices, k), 0)}
             </div>
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-between mt-3 text-[11px] font-mono mz-tx3 gap-2">
-        <span>USD/EGP {fmtNum(prices.usdEgp, 2)}{prices.silver ? ` · silver ${fmtNum(prices.silver, 1)}/g` : ""}</span>
-        <span className="shrink-0">{sourceBadge(prices.source)} · {timeAgo(prices.updated)}</span>
+      <div className="mt-3.5 text-[11px] font-light mz-tx3">
+        EGP/gram · USD/EGP {fmtNum(prices.usdEgp, 2)}{prices.silver ? ` · silver ${fmtNum(prices.silver, 1)}/g` : ""}
       </div>
-      <div className="mt-1 text-[11px] font-mono">
-        <span style={{ color: isToday ? TEAL : AMBER }}>
+      <div className="mt-1 text-[11px] font-light">
+        <span style={isToday ? { color: "var(--muted)" } : { color: "var(--flow-warn)" }}>
           priced {isToday ? "today" : "as of " + (prices.priceDate || "—")}
           {prices.sourceName ? " · " + prices.sourceName : ""}
-          {isToday ? "" : " (not today)"}
+          {isToday ? "" : " — not today"}
         </span>
+        <span className="mz-tx3"> · {sourceBadge(prices.source)} · {timeAgo(prices.updated)}</span>
       </div>
       {webErr && <div className="mt-2 text-[11px] mz-txrose border mz-note-rose rounded-lg p-2">{webErr}</div>}
       {prices.source === "blocked" && !webErr && (
@@ -273,7 +227,7 @@ function WelcomeCard({ onNavigate }) {
   return (
     <Card>
       <div className="text-center py-4">
-        <div className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center mb-3" style={{ background: ACCENT + "1A", color: ACCENT }}>
+        <div className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center mb-3" style={{ background: "var(--sub2)", color: "var(--ink)" }}>
           <Wallet size={22} strokeWidth={2} />
         </div>
         <div className="text-base font-semibold mz-tx1" style={{ fontFamily: DISPLAY_FONT }}>Welcome to Mizan</div>
@@ -294,7 +248,6 @@ export default function Overview({
   fetching, onRefresh, onRefreshWeb, webBusy, webErr, hasAccounts, onNavigate,
   zakat, onZakatChange, today,
 }) {
-  const [hoverClass, setHoverClass] = useState(null);
   const total = liquidTotal || 1;
 
   if (!hasAccounts) {
@@ -308,44 +261,48 @@ export default function Overview({
 
   return (
     <div className="space-y-3">
+      {/* Allocation.
+
+          The donut and the five per-class progress bars are gone. The ribbon
+          in the hero already says what the mix is; repeating it as a pie and
+          then again as bars was the same fact three times. What is left is the
+          part a ribbon cannot show — how far each class has drifted from where
+          you wanted it — and Tide's rule applies: the only thing coloured is
+          the only thing that is off. */}
       <Card>
         <div className="flex items-center justify-between">
-          <CardTitle>Allocation vs. target</CardTitle>
-          <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: MONO_FONT, color: "var(--muted)" }}>liquid only</span>
+          <CardTitle>Allocation</CardTitle>
+          <span className="text-[11px] font-light mz-tx3">liquid only</span>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 mt-3">
-          <AllocationDonut byClass={byClass} liquidTotal={liquidTotal} active={hoverClass} onHover={setHoverClass} />
-          <div className="space-y-3 flex-1 min-w-0">
-            {LIQUID_CLASSES.map((c) => {
-              const actual = ((byClass[c] || 0) / total) * 100;
-              const tgt = (targets && targets[c]) || 0;
-              const drift = actual - tgt;
-              const Icon = CLASS_ICON[c];
-              return (
-                <div key={c} onMouseEnter={() => setHoverClass(c)} onMouseLeave={() => setHoverClass(null)}>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="inline-flex items-center gap-2">
-                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg shrink-0" style={{ background: CLASS_COLOR[c] + "1F", color: CLASS_COLOR[c] }}>
-                        <Icon size={13} strokeWidth={2} />
-                      </span>
-                      <span className="font-medium">{c}</span>
-                    </span>
-                    <span className="font-mono tabular-nums mz-tx2">{fmtEGP(byClass[c] || 0)}</span>
-                  </div>
-                  <div className="relative h-2 mz-sub2 rounded-full overflow-visible">
-                    <div className="mz-bar absolute h-2 rounded-full" style={{ width: Math.min(actual, 100) + "%", background: CLASS_COLOR[c] }} />
-                    <div className="absolute top-[-3px] h-3 w-0.5 rounded" style={{ left: Math.min(tgt, 100) + "%", background: INK }} title={`target ${tgt}%`} />
-                  </div>
-                  <div className="flex justify-between text-[11px] font-mono mt-0.5 mz-tx3">
-                    <span>{actual.toFixed(1)}% actual</span>
-                    <span style={Math.abs(drift) < 3 ? undefined : { color: drift > 0 ? AMBER : TEAL }}>
-                      target {tgt}% · {fmtPct(drift)} drift
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="mt-3 divide-y mz-dv">
+          {LIQUID_CLASSES.map((c) => {
+            const actual = ((byClass[c] || 0) / total) * 100;
+            const tgt = (targets && targets[c]) || 0;
+            const drift = actual - tgt;
+            const off = Math.abs(drift) >= 3 && tgt > 0;
+            return (
+              <div key={c} className="flex items-center gap-3 py-2.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: CLASS_COLOR[c] }} />
+                <span className="flex-1 min-w-0">
+                  <span className="text-sm block truncate">{c}</span>
+                  <span className="text-[11px] font-light mz-tx3">
+                    {tgt > 0 ? `target ${tgt}%` : "no target set"}
+                    {off ? ` · ${fmtPct(drift)}` : ""}
+                  </span>
+                </span>
+                <span className="text-right shrink-0">
+                  {/* Sand in both directions. Being under a target is not
+                      good news any more than being over it is — they are both
+                      just "not where you said", and colouring one mint would
+                      claim a judgement the app has no business making. */}
+                  <span className="tabular-nums text-sm block" style={off ? { color: "var(--flow-warn)" } : undefined}>
+                    {actual.toFixed(0)}%
+                  </span>
+                  <span className="tabular-nums text-[11px] font-light mz-tx3">{fmtEGPShort(byClass[c] || 0)}</span>
+                </span>
+              </div>
+            );
+          })}
         </div>
       </Card>
 

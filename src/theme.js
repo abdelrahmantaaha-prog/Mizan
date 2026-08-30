@@ -1,10 +1,19 @@
-/* Theme constants and icon maps.
+/* Theme constants and icon maps — "Tide".
 
    Light/dark palettes live in CSS variables (see components/FontLoader.jsx):
    --bg, --card, --line, --ink, --muted, --faint, --sub, --sub2. The constants
-   below are the theme-independent anchors: the hero card is always dark navy,
-   and an asset class keeps its colour in both themes so the ribbon, the donut
-   and the legend always agree. */
+   below are the theme-independent anchors — the values that have to be written
+   into inline styles because they are chosen in JavaScript.
+
+   That constraint is what shapes the palette. A class colour is picked in JS
+   and cannot know the theme, so every one of them has to be legible on both
+   the deep teal field and the pale one: mid-tone, moderate saturation, nothing
+   that only works on a white card. The old palette was tuned for white cards
+   and half of it disappeared into the dark ground.
+
+   There is deliberately no brand accent. Tide carries meaning in three
+   signals only — money in, money out, something to look at — and the ground
+   itself is the identity. */
 
 import {
   Landmark, Coins, TrendingUp, Banknote, Building2,
@@ -12,30 +21,37 @@ import {
   ReceiptText, HandHeart, Sparkles, ArrowDownToLine, Tag,
 } from "lucide-react";
 
-// theme: "Deep water." Midnight-navy ink, electric blue accent.
-export const INK = "#0C1730";       // midnight navy (hero card bg, toasts)
-export const INK_2 = "#152341";     // panel navy, one step lighter
-export const HAIRLINE = "#233458";  // border on dark panels
-export const ACCENT = "#3B7DFF";    // electric blue accent
-export const ACCENT_DIM = "#2563EB";
-export const MUTED_ON_DARK = "#8FA0BF";
+// the deep end of the field, used where something must sit on the ground itself
+export const INK = "#0C1F33";
+export const INK_2 = "#123B4A";     // one step along the gradient
+export const HAIRLINE = "rgba(234,244,244,0.14)";
+export const ACCENT = "#3E93A8";    // the ground's own hue, for the few places JS needs one
+export const ACCENT_DIM = "#33788A";
+export const MUTED_ON_DARK = "#B9CFD1";
 
-export const TEAL = "#0d9488";
-export const ROSE = "#e11d48";
-export const AMBER = "#d97706";
+/* The three signals. Money in, money out, look at this. */
+export const TEAL = "#3FB49A";
+export const ROSE = "#E2795F";
+export const AMBER = "#D2A24E";
 
+/* Mid-tone on purpose: each of these has to hold on the deep teal field and
+   on the pale one, because the component picking it does not know which. */
 export const CLASS_COLOR = {
-  "Money market": "#22B8CF", // cyan
-  Gold: "#F2A93B",           // amber — gold stays gold
-  Equity: "#6366F1",         // indigo
-  Cash: "#5B7CC4",           // steel blue
-  Illiquid: "#8B5CF6",       // violet (sits outside the ribbon)
+  "Money market": "#58B4CE",
+  Gold: "#D8AC4A",           // gold stays gold
+  Equity: "#8A86D6",
+  Cash: "#7E9AC2",
+  Illiquid: "#A483D6",       // sits outside the ribbon
 };
-export const LIABILITY_COLOR = "#F4506B"; // coral-red
+export const LIABILITY_COLOR = "#E08A72";
 
-export const DISPLAY_FONT = "'Space Grotesk', ui-sans-serif, system-ui, sans-serif";
-export const BODY_FONT = "'Inter', ui-sans-serif, system-ui, sans-serif";
-export const MONO_FONT = "'JetBrains Mono', ui-monospace, 'SF Mono', monospace";
+/* One family, weight as hierarchy — 200 for figures, 300 for prose, 500/600
+   for the small caps labels. The "mono" role survives as a name because the
+   whole app reaches for it, but in Tide it is Manrope with tabular figures:
+   columns still line up, nothing looks like a terminal. */
+export const DISPLAY_FONT = "'Manrope', ui-sans-serif, system-ui, sans-serif";
+export const BODY_FONT = "'Manrope', ui-sans-serif, system-ui, sans-serif";
+export const MONO_FONT = "'Manrope', ui-sans-serif, system-ui, sans-serif";
 
 export const CLASS_ICON = {
   "Money market": Landmark,
@@ -66,20 +82,20 @@ export const catIcon = (name) => CAT_ICON[name] || Tag;
    hue; anything user-invented is hashed into the same wheel so it stays
    stable across sessions instead of shuffling on every render. */
 const CAT_COLOR = {
-  Food: "#F2A93B",
-  Transport: "#22B8CF",
-  Housing: "#6366F1",
-  Family: "#EC4899",
-  Health: "#14B8A6",
-  Shopping: "#8B5CF6",
-  Bills: "#5B7CC4",
-  Investment: "#10B981",
-  Giving: "#0EA5E9",
-  Personal: "#F97316",
-  Income: "#0d9488",
-  Other: "#94A3B8",
+  Food: "#D8AC4A",
+  Transport: "#58B4CE",
+  Housing: "#8A86D6",
+  Family: "#D683A8",
+  Health: "#4FB8A8",
+  Shopping: "#A483D6",
+  Bills: "#7E9AC2",
+  Investment: "#5FBF9B",
+  Giving: "#63A9D6",
+  Personal: "#E0966B",
+  Income: "#3FB49A",
+  Other: "#93A6AE",
 };
-const WHEEL = ["#F2A93B", "#22B8CF", "#6366F1", "#EC4899", "#14B8A6", "#8B5CF6", "#5B7CC4", "#10B981", "#0EA5E9", "#F97316"];
+const WHEEL = ["#D8AC4A", "#58B4CE", "#8A86D6", "#D683A8", "#4FB8A8", "#A483D6", "#7E9AC2", "#5FBF9B", "#63A9D6", "#E0966B"];
 
 export function catColor(name) {
   if (CAT_COLOR[name]) return CAT_COLOR[name];

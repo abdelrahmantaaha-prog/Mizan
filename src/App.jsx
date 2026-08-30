@@ -34,7 +34,7 @@ import TabBar from "./components/TabBar.jsx";
 import Overview from "./components/Overview.jsx";
 import Accounts from "./components/Accounts.jsx";
 import Activity from "./components/Activity.jsx";
-import { INK, HAIRLINE, ACCENT, MONO_FONT, BODY_FONT } from "./theme.js";
+import { MONO_FONT, BODY_FONT } from "./theme.js";
 
 /* Charts and the settings page are not needed to paint the first screen, so
    they load on demand — it keeps the initial bundle to the shell people
@@ -372,12 +372,12 @@ export default function Mizan() {
           {updateReady && (
             <div className="fixed inset-x-0 z-50 flex justify-center px-4" style={{ bottom: "calc(112px + env(safe-area-inset-bottom))" }}>
               <div className="mz-toast flex items-center gap-3 px-4 py-2.5 rounded-full"
-                   style={{ background: INK, color: "#EAF1FF", border: `1px solid ${HAIRLINE}`, boxShadow: "0 8px 24px rgba(12,23,48,0.35)" }}>
+                   style={{ background: "var(--btn-bg)", color: "var(--btn-fg)" }}>
                 <span className="text-[12px]" style={{ fontFamily: MONO_FONT }}>New version ready</span>
-                <button onClick={reloadWithUpdate} className="text-[12px] font-semibold inline-flex items-center gap-1" style={{ color: ACCENT, fontFamily: MONO_FONT }}>
+                <button onClick={reloadWithUpdate} className="text-[12px] font-semibold inline-flex items-center gap-1" style={{ color: "var(--btn-fg)", fontFamily: MONO_FONT }}>
                   <RefreshCw size={12} strokeWidth={2.4} /> Reload
                 </button>
-                <button onClick={() => setUpdateReady(false)} aria-label="Dismiss" className="text-[12px]" style={{ color: "#8FA0BF", fontFamily: MONO_FONT }}>later</button>
+                <button onClick={() => setUpdateReady(false)} aria-label="Dismiss" className="text-[12px]" style={{ color: "var(--btn-fg)", opacity: 0.6, fontFamily: MONO_FONT }}>later</button>
               </div>
             </div>
           )}
@@ -386,10 +386,10 @@ export default function Mizan() {
           <div className="fixed inset-x-0 z-40 flex flex-col items-center gap-2 px-4 pointer-events-none" style={{ bottom: "calc(64px + env(safe-area-inset-bottom))" }}>
             {toasts.map((t) => (
               <div key={t.id} className="mz-toast pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-full"
-                   style={{ background: INK, color: "#EAF1FF", border: `1px solid ${HAIRLINE}`, boxShadow: "0 8px 24px rgba(12,23,48,0.35)" }}>
+                   style={{ background: "var(--btn-bg)", color: "var(--btn-fg)" }}>
                 <span className="text-[12px]" style={{ fontFamily: MONO_FONT }}>{t.msg}</span>
                 {t.undo && (
-                  <button onClick={() => { t.undo(); dismissToast(t.id); }} className="text-[12px] font-semibold" style={{ color: ACCENT, fontFamily: MONO_FONT }}>
+                  <button onClick={() => { t.undo(); dismissToast(t.id); }} className="text-[12px] font-semibold" style={{ color: "var(--btn-fg)", fontFamily: MONO_FONT }}>
                     Undo
                   </button>
                 )}

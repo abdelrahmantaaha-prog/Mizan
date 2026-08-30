@@ -412,26 +412,29 @@ export default function Accounts({ valued, state, setState }) {
         </Modal>
       )}
 
-      {CLASS_ORDER.map((c) => {
-        const GIcon = CLASS_ICON[c];
-        if (!grouped[c].length) return null;
-        return (
-          <Card key={c}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ background: CLASS_COLOR[c] + "1F", color: CLASS_COLOR[c] }}>
-                <GIcon size={15} strokeWidth={2} />
-              </span>
-              <CardTitle>{c}</CardTitle>
-              {c === ILLIQUID_CLASS && (
-                <span className="text-[10px] uppercase tracking-widest ml-auto" style={{ fontFamily: MONO_FONT, color: "var(--muted)" }}>outside ribbon</span>
-              )}
+      {/* One well for the whole portfolio, not one card per class. The class
+          is a 10px label and a dot inside it — five stacked cards made a
+          portfolio look like five unrelated things, when the point of this
+          screen is that they add up. */}
+      <Card>
+        {CLASS_ORDER.map((c, i) => {
+          if (!grouped[c].length) return null;
+          return (
+            <div key={c} className={i > 0 ? "mt-4 pt-4 border-t mz-bd" : ""}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: CLASS_COLOR[c] }} />
+                <CardTitle>{c}</CardTitle>
+                {c === ILLIQUID_CLASS && (
+                  <span className="text-[11px] font-light mz-tx3 ml-auto">outside the ribbon</span>
+                )}
+              </div>
+              <div className="divide-y mz-dv">
+                {grouped[c].map((a) => <AccountRow key={a.id} a={a} onEdit={setEditing} onDelete={removeAccount} />)}
+              </div>
             </div>
-            <div className="divide-y mz-dv">
-              {grouped[c].map((a) => <AccountRow key={a.id} a={a} onEdit={setEditing} onDelete={removeAccount} />)}
-            </div>
-          </Card>
-        );
-      })}
+          );
+        })}
+      </Card>
     </div>
   );
 }

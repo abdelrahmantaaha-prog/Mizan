@@ -1,10 +1,21 @@
-/* The hero: net worth, its trend, and the liquid allocation ribbon. */
+/* The hero: net worth, its trend, and the liquid allocation ribbon.
+
+   In Tide the hero is not a card. There is one ground for the whole app and
+   this sits directly on it — no panel, no border, nothing to detach the most
+   important number in the app from the field it lives on.
+
+   The trend line carries the month's flow. That is the load-bearing decision
+   of the whole direction: the original pitch had the *ground* drift with your
+   net flow, which works beautifully in the dark and is very nearly invisible
+   on the pale one. Rather than ship an idea that only half exists, the drift
+   moved to the one element that is already about change over time. The field
+   stays constant, the line goes mint or clay, and light mode means it. */
 
 import React, { useMemo, useRef, useState } from "react";
 import { CountUp } from "./ui.jsx";
 import { fmtEGP, fmtEGPShort, fmtNum, fmtPct, dayLabel } from "../lib/format.js";
 import { LIQUID_CLASSES } from "../../shared/model.js";
-import { INK, INK_2, HAIRLINE, ACCENT, MUTED_ON_DARK, CLASS_COLOR, LIABILITY_COLOR } from "../theme.js";
+import { CLASS_COLOR, LIABILITY_COLOR } from "../theme.js";
 
 const RANGES = [
   ["30", "30d", 30],
@@ -13,12 +24,12 @@ const RANGES = [
   ["all", "all", Infinity],
 ];
 
-/* small dark-card stat — compact figures so three columns never clip */
+/* compact figures so three columns never clip */
 function HeroStat({ label, value, exact, color }) {
   return (
     <div className="min-w-0" title={exact || undefined}>
-      <div className="text-[10px] uppercase tracking-widest" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>{label}</div>
-      <div className="tabular-nums text-sm mt-0.5 truncate" style={{ fontFamily: "var(--mz-mono)", color: color || "#EAF1FF" }}>{value}</div>
+      <div className="text-[10px] uppercase mz-tx3" style={{ fontFamily: "var(--mz-mono)", fontWeight: 600, letterSpacing: "0.18em" }}>{label}</div>
+      <div className="tabular-nums text-sm mt-1 truncate" style={{ fontFamily: "var(--mz-mono)", fontWeight: 400, color: color || "var(--ink)" }}>{value}</div>
     </div>
   );
 }
@@ -42,7 +53,7 @@ function TrendChart({ history }) {
 
   if (!history || history.length < 2) {
     return (
-      <div className="mt-3 text-[10px] uppercase tracking-widest" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>
+      <div className="mt-4 text-[12px] font-light mz-tx3">
         History builds as you use the app — one snapshot a day.
       </div>
     );
@@ -63,7 +74,8 @@ function TrendChart({ history }) {
   const last = nets[nets.length - 1];
   const chg = first ? ((last - first) / Math.abs(first)) * 100 : 0;
   const up = chg >= 0;
-  const lineColor = up ? "#34D399" : LIABILITY_COLOR;
+  /* the flow signal, and the only colour on this screen */
+  const lineColor = up ? "var(--flow-in)" : "var(--flow-out)";
 
   const active = hover != null ? Math.max(0, Math.min(nets.length - 1, hover)) : null;
 
@@ -85,18 +97,20 @@ function TrendChart({ history }) {
             <button
               key={k}
               onClick={() => { setRange(k); setHover(null); }}
-              className="text-[10px] uppercase tracking-widest px-1.5 py-0.5 rounded"
+              className="text-[10px] uppercase px-2.5 py-1 rounded-full"
               style={{
                 fontFamily: "var(--mz-mono)",
-                color: range === k ? "#EAF1FF" : MUTED_ON_DARK,
-                background: range === k ? "rgba(234,241,255,0.12)" : "transparent",
+                fontWeight: 600,
+                letterSpacing: "0.14em",
+                color: range === k ? "var(--btn-fg)" : "var(--faint)",
+                background: range === k ? "var(--btn-bg)" : "transparent",
               }}
             >
               {label}
             </button>
           ))}
         </div>
-        <span className="text-[10px] tabular-nums" style={{ fontFamily: "var(--mz-mono)", color: lineColor }}>
+        <span className="text-[11px] tabular-nums font-medium" style={{ color: lineColor }}>
           {fmtPct(chg)} since {dayLabel(data[0].d)}
         </span>
       </div>
@@ -124,23 +138,21 @@ function TrendChart({ history }) {
           <path d={`M ${pts[0]} L ${pts.slice(1).join(" L ")} L ${W},${H} L 0,${H} Z`} fill="url(#mzsparkfill)" />
           <polyline points={pts.join(" ")} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
           {active != null && (
-            <line x1={xOf(active)} y1="0" x2={xOf(active)} y2={H} stroke="rgba(234,241,255,0.35)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            <line x1={xOf(active)} y1="0" x2={xOf(active)} y2={H} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           )}
           <circle
             cx={xOf(active ?? nets.length - 1)}
             cy={yOf(nets[active ?? nets.length - 1])}
             r="3.5"
             fill={lineColor}
-            stroke={INK}
-            strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
         </svg>
       </div>
 
-      <div className="flex items-center justify-between mt-1 text-[10px] tabular-nums" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>
+      <div className="flex items-center justify-between mt-1.5 text-[11px] tabular-nums font-light mz-tx3">
         <span>{dayLabel(shown.d)}</span>
-        <span style={{ color: "#EAF1FF" }}>{fmtEGP(shown.net)}</span>
+        <span className="mz-tx1">{fmtEGP(shown.net)}</span>
       </div>
     </div>
   );
@@ -155,57 +167,60 @@ export default function NetWorthBlock({ net, liabilities, byClass, targets, pric
 
   const cycle = () => setDenom((d) => (d === "EGP" ? "USD" : d === "USD" ? "GOLD" : "EGP"));
 
+  /* The figure carries no unit. At 200 weight and 46px it is the one thing on
+     the screen, and "EGP" in front of it is three letters of noise competing
+     with six digits of meaning — the unit belongs in the line underneath,
+     where the conversions already are. */
   const fmtMain =
-    denom === "USD" ? (v) => "$" + Math.round(v / usdEgp).toLocaleString("en-US")
-    : denom === "GOLD" ? (v) => fmtNum(v / gold24, 0) + " g"
-    : (v) => fmtEGP(v);
+    denom === "USD" ? (v) => Math.round(v / usdEgp).toLocaleString("en-US")
+    : denom === "GOLD" ? (v) => fmtNum(v / gold24, 0)
+    : (v) => Math.round(v).toLocaleString("en-US");
 
   const sub =
-    denom === "USD" ? fmtEGP(net) + " @ " + fmtNum(usdEgp, 2)
-    : denom === "GOLD" ? fmtEGP(net) + " · 24K @ " + fmtNum(gold24, 0) + "/g"
-    : "≈ $" + Math.round(net / usdEgp).toLocaleString("en-US") + " · ≈ " + fmtNum(net / gold24, 0) + " g gold";
+    denom === "USD" ? "USD · " + fmtEGP(net) + " at " + fmtNum(usdEgp, 2)
+    : denom === "GOLD" ? "grams of 24K · " + fmtEGP(net) + " at " + fmtNum(gold24, 0) + "/g"
+    : "EGP · ≈ $" + Math.round(net / usdEgp).toLocaleString("en-US") + " · ≈ " + fmtNum(net / gold24, 0) + " g gold";
 
   return (
-    <div className="relative rounded-2xl p-5 mb-3 overflow-hidden" style={{ background: INK, border: `1px solid ${HAIRLINE}` }}>
-      {/* ambient glow, drifting slowly */}
-      <div className="pointer-events-none absolute -top-16 -right-10 w-56 h-56 rounded-full mz-float"
-           style={{ background: `radial-gradient(closest-side, ${ACCENT}33, transparent)` }} />
-
-      <div className="relative">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] uppercase tracking-widest" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>Net worth</span>
-          <button onClick={cycle} className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full"
-                  style={{ fontFamily: "var(--mz-mono)", color: ACCENT, background: ACCENT + "1A", border: `1px solid ${ACCENT}40` }}>
-            {denom === "GOLD" ? "grams" : denom} · tap
-          </button>
-        </div>
-        <button onClick={cycle} className="block text-left w-full" aria-label={"Net worth in " + denom + ", tap to switch denomination"}>
-          <CountUp
-            value={net}
-            format={fmtMain}
-            className="tabular-nums text-[2.6rem] leading-none tracking-tight truncate block"
-            style={{ fontFamily: "var(--mz-display)", fontWeight: 600, color: "#EAF1FF" }}
-          />
-          <div className="tabular-nums text-sm mt-1.5" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>{sub}</div>
+    <div className="relative px-1 pt-3 pb-5 mb-1">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] uppercase mz-tx3" style={{ fontFamily: "var(--mz-mono)", fontWeight: 600, letterSpacing: "0.2em" }}>Net worth</span>
+        <button onClick={cycle} className="text-[10px] uppercase px-3 py-1 rounded-full mz-btn-ghost"
+                style={{ fontFamily: "var(--mz-mono)", fontWeight: 600, letterSpacing: "0.14em" }}>
+          {denom === "GOLD" ? "grams" : denom} · tap
         </button>
+      </div>
+      <button onClick={cycle} className="block text-left w-full" aria-label={"Net worth in " + denom + ", tap to switch denomination"}>
+        <CountUp
+          value={net}
+          format={fmtMain}
+          className="tabular-nums text-[2.9rem] leading-none truncate block mz-tx1"
+          style={{ fontFamily: "var(--mz-display)", fontWeight: 200, letterSpacing: "-0.03em" }}
+        />
+        <div className="tabular-nums text-[13px] mt-2.5 font-light mz-tx2">{sub}</div>
+      </button>
 
-        <TrendChart history={history} />
+      <TrendChart history={history} />
 
-        {/* liquid / illiquid / liabilities split */}
-        <div className="grid grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${HAIRLINE}` }}>
-          <HeroStat label="Liquid" value={fmtEGPShort(liquidTotal)} exact={fmtEGP(liquidTotal)} color={CLASS_COLOR["Money market"]} />
-          <HeroStat label="Illiquid" value={hasIlliquid ? fmtEGPShort(illiquidTotal) : "—"} exact={hasIlliquid ? fmtEGP(illiquidTotal) : undefined} color={hasIlliquid ? CLASS_COLOR.Illiquid : "#7A89A8"} />
-          <HeroStat label="Liabilities" value={liabilities ? fmtEGPShort(liabilities) : "—"} exact={liabilities ? fmtEGP(liabilities) : undefined} color={liabilities ? LIABILITY_COLOR : "#7A89A8"} />
-        </div>
+      {/* liquid / illiquid / liabilities split */}
+      <div className="grid grid-cols-3 gap-3 mt-5 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+        <HeroStat label="Liquid" value={fmtEGPShort(liquidTotal)} exact={fmtEGP(liquidTotal)} />
+        <HeroStat label="Illiquid" value={hasIlliquid ? fmtEGPShort(illiquidTotal) : "—"} exact={hasIlliquid ? fmtEGP(illiquidTotal) : undefined} />
+        <HeroStat
+          label="Liabilities"
+          value={liabilities ? "−" + fmtEGPShort(liabilities) : "—"}
+          exact={liabilities ? fmtEGP(liabilities) : undefined}
+          color={liabilities ? LIABILITY_COLOR : undefined}
+        />
       </div>
 
       {/* liquid allocation ribbon with target ticks */}
-      <div className="relative mt-4">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[10px] uppercase tracking-widest" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>Liquid allocation</span>
-          <span className="text-[10px]" style={{ fontFamily: "var(--mz-mono)", color: "#7A89A8" }}>ticks = targets</span>
+      <div className="relative mt-5">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] uppercase mz-tx3" style={{ fontFamily: "var(--mz-mono)", fontWeight: 600, letterSpacing: "0.2em" }}>Liquid allocation</span>
+          <span className="text-[11px] font-light mz-tx3">ticks = targets</span>
         </div>
-        <div className="relative h-2.5 w-full rounded-full overflow-hidden flex" style={{ background: INK_2 }}>
+        <div className="relative h-1.5 w-full rounded-full overflow-hidden flex" style={{ background: "var(--sub2)" }}>
           {LIQUID_CLASSES.map((c) => {
             const pct = ((byClass[c] || 0) / base) * 100;
             if (pct <= 0) return null;
@@ -216,14 +231,14 @@ export default function NetWorthBlock({ net, liabilities, byClass, targets, pric
             return LIQUID_CLASSES.map((c) => {
               acc += (targets && targets[c]) || 0;
               if (acc >= 100) return null;
-              return <div key={"t" + c} className="absolute top-0 h-2.5" style={{ left: acc + "%", width: "2px", background: "rgba(234,241,255,0.55)" }} />;
+              return <div key={"t" + c} className="absolute top-0 h-1.5" style={{ left: acc + "%", width: "2px", background: "var(--bg-solid)", opacity: 0.85 }} />;
             });
           })()}
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
           {LIQUID_CLASSES.map((c) => (
-            <span key={c} className="inline-flex items-center gap-1.5 text-[11px]" style={{ fontFamily: "var(--mz-mono)", color: MUTED_ON_DARK }}>
-              <span className="inline-block w-2 h-2 rounded-full" style={{ background: CLASS_COLOR[c] }} />
+            <span key={c} className="inline-flex items-center gap-1.5 text-[11px] font-light mz-tx2">
+              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: CLASS_COLOR[c] }} />
               {c} {(((byClass[c] || 0) / base) * 100).toFixed(0)}%
             </span>
           ))}
