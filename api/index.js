@@ -13,6 +13,11 @@ import { ExpressAuth, getSession } from "@auth/express";
 import { authConfig, authConfigured, userIdFrom } from "./_auth.js";
 import { isConfigured as dbConfigured, getDoc, insertDoc, updateDoc, deleteDoc } from "./_db.js";
 import { pushDocument } from "./_sync-core.js";
+import {
+  isConfigured as tgConfigured, botUsername, webhookSecret, readUpdate,
+  createLinkCode, redeemLinkCode, userForChat, chatsForUser, unlinkUser,
+  addItem, listItems, getItemFileId, deleteItems, fetchFile, reply,
+} from "./_inbox.js";
 
 /* the store seam _sync-core.js writes through — Neon in production, an
    in-memory fake in test/sync-core.test.js */
@@ -90,11 +95,21 @@ async function requireUser(req, res) {
 app.get("/api/me", async (req, res) => {
   const s = await session(req);
   res.setHeader("Cache-Control", "no-store");
+  const id = userIdFrom(s);
+  let telegram = { available: tgConfigured(), bot: botUsername(), linked: false };
+  if (telegram.available && id) {
+    try {
+      telegram.linked = (await chatsForUser(id)).length > 0;
+    } catch {
+      telegram.available = false; // the table is unreachable; don't offer the feature
+    }
+  }
   res.json({
     sync: authConfigured() && dbConfigured(),
     auth: authConfigured(),
     db: dbConfigured(),
-    user: s && s.user ? { id: userIdFrom(s), name: s.user.name, email: s.user.email, image: s.user.image } : null,
+    telegram,
+    user: s && s.user ? { id, name: s.user.name, email: s.user.email, image: s.user.image } : null,
   });
 });
 
@@ -193,6 +208,143 @@ app.get("/api/prices", rateLimit(120, 60_000), async (_req, res) => {
   } catch {
     if (priceCache.data) return res.json({ ...priceCache.data, cached: true, stale: true });
     res.status(502).json({ error: "upstream-unavailable" });
+  }
+});
+
+/* ---------- Telegram capture ----------
+   The bot writes into an inbox; the app drains it. Nothing here parses or
+   touches the synced document — see _inbox.js for why that separation is
+   deliberate rather than merely unfinished. */
+
+/* The webhook. Telegram retries anything that is not a prompt 200, so this
+   answers 200 for everything it understands, including refusals: an unlinked
+   chat is a fact to report to its sender, not a delivery failure. */
+app.post("/api/telegram", async (req, res) => {
+  if (!tgConfigured()) return res.status(200).json({ ok: true, skipped: "unconfigured" });
+
+  // Telegram echoes back the secret set at setWebhook time; nothing else can.
+  const given = req.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  const want = webhookSecret();
+  if (!want || given !== want) return res.status(401).json({ error: "bad-secret" });
+
+  res.json({ ok: true }); // acknowledge first; the work below must not hold the retry timer
+
+  try {
+    const u = readUpdate(req.body);
+    if (!u || u.kind === "ignored") return;
+
+    if (u.kind === "start") {
+      if (!u.code) {
+        await reply(u.chatId, "Open Mizan → Settings → Telegram capture, and send me the code it shows.");
+        return;
+      }
+      const linked = await redeemLinkCode(u.code, u.chatId);
+      await reply(
+        u.chatId,
+        linked
+          ? "Linked. Send me what you spent — \"80 uber\", or a photo of a receipt — and it'll be waiting in Mizan next time you open it."
+          : "That code has expired or was already used. Mizan → Settings → Telegram capture will show a fresh one."
+      );
+      return;
+    }
+
+    const userId = await userForChat(u.chatId);
+    if (!userId) {
+      await reply(u.chatId, "This chat isn't linked to a Mizan account yet. Open Mizan → Settings → Telegram capture for a code, then send me /start <code>.");
+      return;
+    }
+
+    if (u.kind === "help") {
+      const items = await listItems(userId);
+      await reply(u.chatId, `Linked and listening. ${items.length} item${items.length === 1 ? "" : "s"} waiting for you to confirm in Mizan.`);
+      return;
+    }
+    if (u.kind === "stop") {
+      await unlinkUser(userId);
+      await reply(u.chatId, "Unlinked. Nothing more will be captured from this chat.");
+      return;
+    }
+
+    await addItem(userId, {
+      kind: u.kind,
+      body: u.text || "",
+      fileId: u.kind === "photo" ? u.fileId : null,
+    });
+    await reply(
+      u.chatId,
+      u.kind === "photo" ? "Receipt saved — Mizan will read it when you open it." : "Saved. Confirm it in Mizan when you're next in."
+    );
+  } catch (e) {
+    if (e && e.code === "inbox-full") {
+      const chatId = req.body?.message?.chat?.id;
+      if (chatId) await reply(chatId, "Your Mizan inbox is full — clear the waiting items in the app and send this again.");
+      return;
+    }
+    console.error("telegram webhook", e);
+  }
+});
+
+/* Hand out a linking code. Short-lived and single-use; see _inbox.js. */
+app.post("/api/inbox/link", rateLimit(10, 60_000), async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!tgConfigured()) return res.status(503).json({ error: "telegram-unconfigured" });
+  try {
+    res.json(await createLinkCode(user.id));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.code || "link-failed" });
+  }
+});
+
+app.delete("/api/inbox/link", rateLimit(10, 60_000), async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  try {
+    await unlinkUser(user.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.code || "unlink-failed" });
+  }
+});
+
+app.get("/api/inbox", rateLimit(120, 60_000), async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!tgConfigured()) return res.json({ items: [], available: false });
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ items: await listItems(user.id), available: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.code || "inbox-failed" });
+  }
+});
+
+/* Photo bytes, proxied so the bot token stays on the server and the database
+   never holds an image. */
+app.get("/api/inbox/:id/file", rateLimit(60, 60_000), async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  try {
+    const fileId = await getItemFileId(user.id, req.params.id);
+    if (!fileId) return res.status(404).json({ error: "not-found" });
+    const { buf, type } = await fetchFile(fileId);
+    res.setHeader("Content-Type", type);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(buf);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.code || "file-failed" });
+  }
+});
+
+/* The app has taken these into its own review list. */
+app.post("/api/inbox/ack", rateLimit(60, 60_000), async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  try {
+    const removed = await deleteItems(user.id, req.body && req.body.ids);
+    res.json({ removed });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.code || "ack-failed" });
   }
 });
 

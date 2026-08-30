@@ -1,0 +1,1381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inside Mizan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A chapter-by-chapter tour of the Mizan codebase, built from its real source.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* ---------- tokens: light is the base, both dark states redefine only these ---------- */
+:root {
+  --ground: hsl(252 18% 97%);
+  --surface: #FFFFFF;
+  --surface-2: hsl(248 17% 95%);
+  --ink: hsl(258 47% 11%);
+  --ink-soft: hsl(254 20% 32%);
+  --ink-faint: hsl(256 11% 47%);
+  --line: hsl(250 17% 88%);
+  --line-soft: hsl(246 18% 93%);
+  --teal: hsl(258 80% 27%);
+  --teal-deep: hsl(258 80% 20%);
+  --teal-wash: hsl(252 25% 92%);
+  --ochre: hsl(40 82% 31%);
+  --ochre-wash: hsl(44 72% 92%);
+  --danger: hsl(4 53% 43%);
+  --ok: hsl(150 60% 30%);
+  --shadow: 0 1px 2px hsl(258 47% 11% / .05), 0 8px 24px -12px hsl(258 47% 11% / .18);
+  --radius: 10px;
+  /* the code panel is an editor window: dark in both themes, on purpose */
+  --code-bg: hsl(258 44% 8%);
+  --code-ink: hsl(254 23% 87%);
+  --code-dim: hsl(258 16% 41%);
+  --code-line: hsl(256 38% 14%);
+  --c-key: hsl(254 46% 66%);
+  --c-str: hsl(43 68% 63%);
+  --c-com: hsl(254 15% 42%);
+  --c-num: hsl(28 70% 80%);
+  --c-fn: hsl(48 48% 86%);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --ground: hsl(261 37% 6%);
+  --surface: hsl(258 38% 9%);
+  --surface-2: hsl(258 37% 12%);
+  --ink: hsl(254 29% 93%);
+  --ink-soft: hsl(255 17% 75%);
+  --ink-faint: hsl(259 13% 58%);
+  --line: hsl(256 26% 16%);
+  --line-soft: hsl(256 31% 13%);
+  --teal: hsl(258 47% 51%);
+  --teal-deep: hsl(258 54% 63%);
+  --teal-wash: hsl(261 51% 13%);
+  --ochre: hsl(44 74% 59%);
+  --ochre-wash: hsl(42 39% 12%);
+  --danger: hsl(5 65% 68%);
+  --ok: hsl(146 47% 62%);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: hsl(261 37% 6%);
+  --surface: hsl(258 38% 9%);
+  --surface-2: hsl(258 37% 12%);
+  --ink: hsl(254 29% 93%);
+  --ink-soft: hsl(255 17% 75%);
+  --ink-faint: hsl(259 13% 58%);
+  --line: hsl(256 26% 16%);
+  --line-soft: hsl(256 31% 13%);
+  --teal: hsl(258 47% 51%);
+  --teal-deep: hsl(258 54% 63%);
+  --teal-wash: hsl(261 51% 13%);
+  --ochre: hsl(44 74% 59%);
+  --ochre-wash: hsl(42 39% 12%);
+  --danger: hsl(5 65% 68%);
+  --ok: hsl(146 47% 62%);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.7);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { font-family: Newsreader, Georgia, "Times New Roman", serif; font-weight: 600; text-wrap: balance; line-height: 1.18; margin: 0; }
+p { margin: 0; }
+a { color: var(--teal); text-underline-offset: 3px; }
+code, kbd { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
+
+/* ---------- shell ---------- */
+.shell { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 0; min-height: 100vh; }
+.rail {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  border-inline-end: 1px solid var(--line); background: var(--surface);
+  padding: 22px 18px 32px; display: flex; flex-direction: column; gap: 18px;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.mark {
+  width: 34px; height: 34px; border-radius: 9px; background: var(--teal); color: #fff;
+  display: grid; place-items: center; font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 15px;
+}
+.brand b { font-family: Newsreader, serif; font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+.brand span { display: block; font-size: 11.5px; color: var(--ink-faint); font-family: "IBM Plex Mono", monospace; letter-spacing: .04em; }
+nav.toc { display: flex; flex-direction: column; gap: 1px; }
+nav.toc a {
+  display: grid; grid-template-columns: 26px 1fr; align-items: baseline; gap: 6px;
+  padding: 7px 9px; border-radius: 8px; text-decoration: none; color: var(--ink-soft);
+  font-size: 14px; line-height: 1.3;
+}
+nav.toc a .num { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+nav.toc a:hover { background: var(--surface-2); color: var(--ink); }
+nav.toc a.active { background: var(--teal-wash); color: var(--teal-deep); font-weight: 600; }
+nav.toc a.active .num { color: var(--teal); }
+.rail-foot { margin-top: auto; font-size: 12px; color: var(--ink-faint); border-top: 1px solid var(--line-soft); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.theme-btn {
+  font: inherit; font-size: 12px; color: var(--ink-soft); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; cursor: pointer; width: fit-content;
+}
+.theme-btn:hover { color: var(--ink); }
+
+main { padding: 0 0 120px; min-width: 0; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
+section { padding: 54px 0 10px; scroll-margin-top: 12px; }
+.prose { max-width: 68ch; display: flex; flex-direction: column; gap: 18px; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--teal); font-weight: 600;
+}
+h2 { font-size: clamp(26px, 3.4vw, 36px); margin-top: 6px; }
+h3 { font-size: 20px; margin-top: 8px; }
+.lede { font-size: 18.5px; color: var(--ink-soft); }
+.prose ul, .prose ol { margin: 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 8px; }
+.prose li::marker { color: var(--teal); }
+strong { font-weight: 600; }
+
+/* ---------- hero ---------- */
+.hero { padding: 68px 0 26px; }
+.hero h1 { font-size: clamp(38px, 6vw, 66px); letter-spacing: -.015em; }
+.hero .sub { max-width: 60ch; font-size: 19px; color: var(--ink-soft); margin-top: 18px; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.fact {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 7px 14px; font-size: 13px; color: var(--ink-soft); font-family: "IBM Plex Mono", monospace;
+}
+.fact b { color: var(--ink); font-weight: 600; }
+
+/* ---------- cards ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 8px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
+.card h4 { font-size: 17px; margin-bottom: 6px; }
+.card p { font-size: 14.5px; color: var(--ink-soft); }
+.card .tagline { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--teal); letter-spacing: .04em; margin-bottom: 8px; }
+
+.note-box {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  padding: 16px 18px; display: flex; gap: 14px; align-items: flex-start;
+}
+.note-box.warn { background: var(--ochre-wash); border-color: color-mix(in srgb, var(--ochre) 35%, transparent); }
+.note-box .badge {
+  flex: none; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ochre); border: 1px solid color-mix(in srgb, var(--ochre) 45%, transparent);
+  border-radius: 999px; padding: 3px 9px; margin-top: 2px;
+}
+.note-box p { font-size: 15px; color: var(--ink-soft); }
+
+/* ---------- glossary term ---------- */
+button.term {
+  font: inherit; color: var(--ink); background: none; border: 0; padding: 0; cursor: help;
+  border-bottom: 1.5px dotted var(--teal);
+}
+button.term:hover, button.term:focus-visible { color: var(--teal-deep); }
+#pop {
+  position: absolute; z-index: 60; max-width: 300px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 10px 12px; font-size: 14px; line-height: 1.5; display: none;
+}
+#pop b { color: var(--teal); }
+
+/* ---------- code specimen ---------- */
+.specimen { margin: 26px 0 8px; }
+.spec-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface); padding: 10px 14px;
+}
+.spec-path { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); font-weight: 500; }
+.spec-what { font-size: 13px; color: var(--ink-faint); }
+.spec-steps { margin-inline-start: auto; display: flex; align-items: center; gap: 6px; }
+.step-btn {
+  font: inherit; font-family: "IBM Plex Mono", monospace; font-size: 12px; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-soft);
+  border-radius: 7px; padding: 4px 10px;
+}
+.step-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--teal); }
+.step-btn:disabled { opacity: .4; cursor: default; }
+.step-count { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-faint); }
+
+.spec-body { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(230px, .8fr); gap: 0; border: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
+.code-pane { background: var(--code-bg); overflow-x: auto; padding: 12px 0; }
+pre.code { margin: 0; font-family: "IBM Plex Mono", monospace; font-size: 13px; line-height: 1.62; color: var(--code-ink); min-width: max-content; }
+.cl { display: grid; grid-template-columns: 46px 14px 1fr; align-items: baseline; }
+.cl .n { color: var(--code-dim); text-align: right; padding-inline-end: 10px; font-size: 11.5px; user-select: none; }
+.cl .dot { color: transparent; font-size: 11px; }
+.cl.has-note { cursor: pointer; }
+.cl.has-note .dot { color: var(--ochre); }
+.cl.has-note:hover { background: rgba(255,255,255,.045); }
+.cl.on { background: color-mix(in srgb, var(--ochre) 22%, transparent); }
+.cl.on .n { color: var(--ochre); }
+.cl .t { white-space: pre; padding-inline-end: 18px; }
+.cl:focus-visible { outline: 2px solid var(--ochre); outline-offset: -2px; }
+.tok-k { color: var(--c-key); }
+.tok-s { color: var(--c-str); }
+.tok-c { color: var(--c-com); font-style: italic; }
+.tok-n { color: var(--c-num); }
+.tok-f { color: var(--c-fn); }
+
+.note-pane { background: var(--surface); border-inline-start: 1px solid var(--line); padding: 16px 16px 18px; }
+.note-pane .nl { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ochre); }
+.note-pane .nt { margin-top: 8px; font-size: 14.5px; color: var(--ink-soft); line-height: 1.6; }
+.note-pane .nt code { font-size: 13px; background: var(--surface-2); border-radius: 4px; padding: 1px 4px; color: var(--ink); }
+.note-pane .hint { font-size: 13px; color: var(--ink-faint); }
+
+/* ---------- trace diagram ---------- */
+.trace { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 18px; margin: 24px 0 8px; }
+.trace-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.trace-top h4 { font-size: 17px; }
+.play {
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; margin-inline-start: auto;
+  background: var(--teal); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px;
+}
+.play:hover { background: var(--teal-deep); }
+.hops { display: flex; flex-direction: column; gap: 8px; }
+.hop {
+  display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start;
+  border: 1px solid var(--line-soft); background: var(--surface-2); border-radius: 9px; padding: 11px 13px;
+  opacity: .45; transition: opacity .25s ease, border-color .25s ease, background .25s ease;
+}
+.hop .k { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+.hop b { font-size: 14.5px; display: block; }
+.hop span { font-size: 13.5px; color: var(--ink-soft); }
+.hop code { font-size: 12.5px; color: var(--teal-deep); }
+.hop.lit { opacity: 1; border-color: var(--teal); background: var(--teal-wash); }
+.hop.lit .k { color: var(--teal); }
+@media (prefers-reduced-motion: reduce) { .hop { transition: none; } }
+
+/* ---------- check yourself ---------- */
+.check { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; margin-top: 20px; }
+.check .q { font-weight: 600; font-size: 15.5px; }
+.check .reveal { font: inherit; font-size: 13px; margin-top: 10px; cursor: pointer; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-soft); border-radius: 7px; padding: 5px 12px; }
+.check .reveal:hover { color: var(--ink); }
+.check .a { display: none; margin-top: 10px; font-size: 15px; color: var(--ink-soft); border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.check.open .a { display: block; }
+.check.open .reveal { display: none; }
+
+/* ---------- commands ---------- */
+.cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border-radius: 8px; padding: 9px 12px; margin-top: 8px; }
+.cmd code { color: var(--code-ink); font-size: 13px; flex: 1; overflow-x: auto; white-space: pre; }
+.copy { font: inherit; font-family: "IBM Plex Mono", monospace; font-size: 11px; cursor: pointer; background: #1B3B34; color: #9FD7C9; border: 1px solid #24504733; border-radius: 6px; padding: 4px 9px; }
+.copy:hover { background: #24504A; }
+
+/* ---------- tables ---------- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 520px; }
+th, td { text-align: start; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+th { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td code { font-size: 13px; color: var(--teal-deep); }
+
+hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
+
+@media (max-width: 1080px) {
+  .spec-body { grid-template-columns: 1fr; }
+  .note-pane { border-inline-start: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail { position: static; height: auto; border-inline-end: 0; border-bottom: 1px solid var(--line); }
+  nav.toc { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  nav.toc a { flex: none; grid-template-columns: 1fr; }
+  nav.toc a .num { display: none; }
+  .rail-foot { display: none; }
+  .wrap { padding: 0 20px; }
+  body { font-size: 16px; }
+}
+
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="brand">
+      <div class="mark">م</div>
+      <div>
+        <b>Inside Mizan</b>
+        <span>ميزان v2.0 · 5,661 lines</span>
+      </div>
+    </div>
+    <nav class="toc" id="toc"></nav>
+    <div class="rail-foot">
+      <button class="theme-btn" id="themeBtn" type="button">Switch theme</button>
+      <div>Click any line with a <span style="color:var(--ochre)">&bull;</span> to read what it does.</div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="wrap">
+
+      <header class="hero">
+        <div class="eyebrow">A tour of your own codebase</div>
+        <h1>Inside Mizan</h1>
+        <p class="sub">Every line of code on this page is real code from <code>Downloads/Claude/Mizan</code> — not simplified examples. We start from “what is a net-worth figure made of” and end at “I can change the valuation rule without rewriting last March.”</p>
+        <div class="facts">
+          <div class="fact"><b>6</b> collections</div>
+          <div class="fact"><b>5</b> test suites</div>
+          <div class="fact"><b>46</b> tests</div>
+          <div class="fact"><b>3</b> price routes</div>
+          <div class="fact"><b>2</b> nisab standards</div>
+          <div class="fact"><b>400</b> days of history</div>
+        </div>
+      </header>
+
+      <hr class="rule">
+
+      <section id="ch0" data-title="Start here">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 0</div>
+          <h2>Start here</h2>
+          <p class="lede">Read this page in order, at a screen, with the repo open beside it. It is built to be used, not skimmed.</p>
+          <p>Three things worth knowing before we begin.</p>
+          <p><strong>“Line by line” has to be honest.</strong> Mizan is 5,661 lines. This page walks <strong>the spine</strong> — valuation, the shared model, the merge, zakat, prices — line by line, and teaches you the pattern so the components read as variations you already understand.</p>
+          <p><strong>Mizan is the project where a silent bug costs data rather than a screen.</strong> Its own README says so: the tests cover “the parts where a silent bug costs real data”. A tracker that quietly moves last year's numbers is worse than one that crashes, because you will believe it. Chapter 3 is that idea, made into code.</p>
+          <p><strong>The dotted lines are the lesson.</strong> In every code panel, lines with an ochre dot in the gutter carry a note. Click one, or use the Prev / Next buttons and the arrow keys, and the note appears beside the code.</p>
+          <div class="note-box">
+            <span class="badge">Setup</span>
+            <p>Open a second window with VS Code on the <code>Mizan</code> folder. Every file path on this page means the file at that path inside <code>Downloads/Claude/Mizan</code>. Reading a file in the editor right after reading it here is what makes it stick.</p>
+          </div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch1" data-title="What this thing is">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 1</div>
+          <h2>What this thing actually is</h2>
+          <p class="lede">A net-worth tracker built for holdings that are not all in one currency, and not all in currency at all.</p>
+          <p>Most money apps assume one currency and a bank that tells you the balance. Mizan assumes neither. An Egyptian portfolio is EGP in one account, dollars in another, and gold by the gram at 21 or 24 karat — three units that only become one number when you multiply by today's prices.</p>
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="tagline">part 1</div>
+            <h4>A Vite React app</h4>
+            <p>A single-page app, deliberately not Next.js. It builds to static files and runs entirely in the browser — which is what makes “works with no backend” a true statement rather than a marketing one.</p>
+          </div>
+          <div class="card" style="border-color: var(--teal);">
+            <div class="tagline">the source of truth</div>
+            <h4>One document in localStorage</h4>
+            <p>Accounts, transactions, debts, recurring rules, daily history, price history, plus three scalar maps. Everything else in the app is derived from it.</p>
+          </div>
+          <div class="card">
+            <div class="tagline">part 3</div>
+            <h4>The price feed</h4>
+            <p>Gold and USD/EGP, from three routes in order of cost: a serverless proxy, the public APIs direct, and — last resort — an AI with search grounding that can read the Egyptian صاغة market.</p>
+          </div>
+          <div class="card">
+            <div class="tagline">part 4, optional</div>
+            <h4>Express + Auth.js + Neon</h4>
+            <p>The sync backend, running as one Vercel function. Without the environment variables the app runs local-only and <em>says so in Settings</em> rather than showing a broken sign-in button.</p>
+          </div>
+        </div>
+
+        <div class="prose" style="margin-top: 22px;">
+          <h3>The sentence that explains the whole design</h3>
+          <p>Mizan is <strong>local-first with a live price layer</strong>. Two consequences follow, and they pull in opposite directions. Because it is local-first, two devices can edit offline and the merge must resolve without a referee. Because prices are live, the same holding is worth a different number every day — and that is desirable for balances and <em>catastrophic</em> for history.</p>
+          <p>Chapter 3 is how those two facts are reconciled, and it is the most important idea in the codebase.</p>
+        </div>
+
+        <div class="check" data-answer="Your net worth. It is not stored anywhere — it is the sum of every account's balance multiplied by today's rate for that account's unit. That is why it moves when the gold price moves without anything in your data changing, and it is why there is no 'net worth' field to go stale.">
+          <div class="q">Check yourself: which number on the Overview screen exists nowhere in storage?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch2" data-title="The map">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 2</div>
+          <h2>The map: where anything lives</h2>
+          <p class="lede">Four places, and the split between them is the architecture.</p>
+        </div>
+
+        <div class="tablewrap" style="margin-top: 20px;">
+          <table>
+            <thead>
+              <tr><th>Folder</th><th>What lives there</th><th>Look here when…</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>shared/model.js</code></td><td>The data model, the merge, migration, the fingerprint. Imported <em>verbatim</em> by both browser and server.</td><td>“Two devices disagreed.”</td></tr>
+              <tr><td><code>src/lib/</code></td><td>The rules with no UI: valuation, zakat, prices, parsing, recurring, sync, storage, AI, export.</td><td>“This number is wrong.”</td></tr>
+              <tr><td><code>src/components/</code></td><td>The screens: Overview, Accounts, Activity, Spending, NetWorth, Prices, Settings.</td><td>“This screen shows it oddly.”</td></tr>
+              <tr><td><code>api/</code></td><td>Express + Auth.js + Neon in one Vercel function: sign-in, the sync endpoint, the price proxy.</td><td>“Sign-in fails.” · “Prices are blocked.”</td></tr>
+              <tr><td><code>test/</code></td><td>46 tests over exactly five files — merge, migration, sync push, valuation, zakat.</td><td>Before every change to the five things above.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="prose" style="margin-top: 22px;">
+          <div class="note-box">
+            <span class="badge">Read the top of shared/model.js</span>
+            <p>It opens with a constraint rather than a description: <em>“Keep this file free of DOM, React, Node and network APIs.”</em> That is not style advice. <code>api/</code> imports it inside a Vercel function and <code>src/</code> imports it into the browser bundle, so a single <code>window.</code> or <code>require()</code> in that file breaks one side or the other — and it will break the side you are not currently testing.</p>
+          </div>
+          <p>Look at what has tests and what does not. <code>Activity.jsx</code> is 783 lines and has none; <code>valuation.js</code> is 101 lines and has ten. That is not neglect — it is the same discipline as Rhythm's. Every rule that would be expensive to get wrong has been pulled out of the UI into a file that takes values in and returns values out, and those files are where every test lives.</p>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch3" data-title="The valuation rule">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 3</div>
+          <h2>The rule that stops history rewriting itself</h2>
+          <p class="lede">A balance is worth today's price. A transaction is worth what it was worth when it happened. Confusing the two is the bug this file was written to kill.</p>
+          <p>Here is the failure in plain terms. You logged a $100 dinner last year. If the app values that transaction at today's rate, then every time the pound weakens, last year's dinner gets more expensive — and your “spent in March” total moves on its own, months after March ended.</p>
+          <p>The fix is a single discipline: capture the rate at the moment of logging, and read the snapshot forever after.</p>
+        </div>
+        <div class="specimen" data-spec="valuationHead"></div>
+
+        <div class="prose">
+          <p>The capture happens once, when a transaction is written.</p>
+        </div>
+        <div class="specimen" data-spec="snapshot"></div>
+
+        <div class="prose">
+          <p>And the read has a fallback chain, because data outlives the accounts that made it.</p>
+        </div>
+        <div class="specimen" data-spec="sideRate"></div>
+
+        <div class="note-box warn">
+          <span class="badge">The general lesson</span>
+          <p>This distinction has a name in accounting — <strong>historical cost</strong> versus <strong>fair value</strong> — and it appears in far more systems than money apps. Anything you record has two possible valuations: what it is worth now, and what it was worth then. Ask which one each screen needs, and store the second one at write time, because it can never be reconstructed later.</p>
+        </div>
+
+        <div class="check" data-answer="Nothing about the transaction changes. snapshotSides copied fromName and fromRate onto the transaction when it was logged, so the row still values correctly and still reads with the account's name rather than 'undefined →'. sideName falls back to txn.fromName, and only if that is missing does it say 'removed account'. Denormalising those two fields is what makes deletion safe.">
+          <div class="q">Check yourself: you delete the account a two-year-old expense was paid from. What happens to that expense in the Spending tab?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch4" data-title="The document">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 4</div>
+          <h2>One document, six collections, three scalars</h2>
+          <p class="lede">The shape of the data is chosen so that merging two copies is possible at all. Everything about it is a sync decision in disguise.</p>
+        </div>
+        <div class="specimen" data-spec="model"></div>
+
+        <div class="note-box">
+          <span class="badge">Why soft deletes</span>
+          <p>A hard delete is <em>invisible</em>. Device A removes a row and pushes; device B never knew about the removal, still has the row, and pushes it back. The row returns from the dead and the user cannot understand why. A tombstone makes the deletion a fact that can travel — and because it carries a timestamp, it competes fairly against a later genuine re-creation.</p>
+          <p style="margin-top:10px">Tombstones are not kept forever: <code>TOMBSTONE_TTL_DAYS = 120</code> is a bet that no device stays offline for four months. That is the right shape of trade-off to notice — a correctness guarantee traded for bounded storage, with the assumption written down.</p>
+        </div>
+
+        <div class="prose">
+          <h3>Migration: accepting whatever arrives</h3>
+          <p><code>migrate()</code> runs on every document that enters the app, from any source — old localStorage, an imported backup file, a push from the server. There is no path into the app that skips it, and that single fact is why the rest of the code can assume a well-formed shape.</p>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch5" data-title="The merge">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 5</div>
+          <h2>The merge, record by record</h2>
+          <p class="lede">Both devices push their whole document. The server merges blindly. No change log, no vector clocks, no reconciliation code on the client.</p>
+          <p>That is only possible because the merge has two mathematical properties. It is <strong>symmetric</strong> — <code>merge(a,b)</code> and <code>merge(b,a)</code> hold the same content — and <strong>idempotent</strong> — merging twice changes nothing. Together they mean the server does not need to know who edited what, in which order, or whether it has seen this request before.</p>
+        </div>
+        <div class="specimen" data-spec="mergeCollection"></div>
+
+        <div class="prose">
+          <p>And the whole-document merge that drives it, which also does two things that are easy to miss.</p>
+        </div>
+        <div class="specimen" data-spec="mergeState"></div>
+
+        <div class="note-box warn">
+          <span class="badge">What this costs you</span>
+          <p>Last-write-wins per record means exactly what it says: if you genuinely edit <em>the same account</em> on two devices while both are offline, one of those edits is discarded and nothing tells you. That is a real cost, accepted deliberately in exchange for a merge that needs no user interface, no conflict dialog and no server state. Logging an expense on your phone while editing an account on your laptop keeps both, because those are different records — which is the case that actually happens.</p>
+        </div>
+
+        <div class="prose">
+          <h3>The same fingerprint story</h3>
+          <p>Mizan carries the same <code>fingerprint()</code> / <code>stable()</code> pair as Rhythm, for the same reason: deciding “has this changed?” with <code>JSON.stringify</code> compares key <em>order</em>, and the server builds the merged document in a different order than <code>migrate()</code> does on the way back in. Unchanged documents then compare unequal on every round trip, and the client pushes, adopts, sees a difference, and pushes again — forever, while the user is trying to type.</p>
+          <p>Both projects fixed it the same way, and the fix is nine lines: sort the keys, drop <code>undefined</code>, recurse.</p>
+        </div>
+
+        <div class="check" data-answer="It wins, and that is deliberate — line 182 breaks a tie in favour of the tombstone. Without that rule a delete could be silently undone by a same-millisecond write from the other device, and the deleted row would reappear with no explanation. Ties are rare; making them deterministic is what keeps the merge symmetric.">
+          <div class="q">Check yourself: two devices touch the same account in the same millisecond — one edits it, one deletes it. Which wins?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch6" data-title="Prices">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 6</div>
+          <h2>Prices: three routes and a plausibility gate</h2>
+          <p class="lede">Every number in the app is multiplied by these two figures. Getting a wrong one is worse than getting none.</p>
+        </div>
+        <div class="specimen" data-spec="prices"></div>
+
+        <div class="note-box">
+          <span class="badge">The pattern worth stealing</span>
+          <p><code>inGoldRange</code> and <code>inFxRange</code> are two lines that prevent a whole class of disaster. A parser that grabs the wrong number from a page — a page count, a percentage, a timestamp — will hand you something numerically valid and financially absurd. Bounding the answer to what is <em>plausible</em> turns a silent repricing of the entire portfolio into a clean failure that falls through to the next route.</p>
+          <p style="margin-top:10px">Whenever you ingest a number from a source you do not control, ask what range it could sanely be in, and reject outside it. It costs two lines and it is the difference between an app that is wrong and an app that says it does not know.</p>
+        </div>
+
+        <div class="prose">
+          <p>The route order is the interesting part, and it is ordered by cost <em>to the user</em>, not by convenience. The proxy first, because it fetches server-side — so the browser's CORS rules and the sandboxes that used to leave the app stuck on “blocked” never come into it, and the response is cached for everyone. Then the public APIs direct, which works on the open web and keeps the app functional for anyone running it without the backend. Only last, the AI with search grounding: it costs tokens, and it is the only route that can read the Egyptian صاغة market rather than derive a local price from the global spot.</p>
+          <p>Note that the last route is also the <em>most accurate</em> one for this specific market, and it is still last. Accuracy is not the only axis.</p>
+        </div>
+
+        <div class="check" data-answer="SEED_PRICES — a hard-coded baseline with source: 'seed' and a priceDate from June 2026. The app keeps working and every screen keeps rendering, but the source label says 'fallback baseline' rather than pretending to be live. Showing a stale number honestly beats showing nothing, and beats showing it as though it were current.">
+          <div class="q">Check yourself: all three routes fail. What does the app show, and how does the user know?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch7" data-title="Zakat">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 7</div>
+          <h2>Zakat: a threshold, a clock, and an admission</h2>
+          <p class="lede">Eighty-two lines that encode a religious obligation — and, more importantly, know where their own authority ends.</p>
+          <p>Two things the earlier version of this card got wrong, and the file names both at the top rather than hiding them.</p>
+        </div>
+        <div class="specimen" data-spec="zakat"></div>
+
+        <div class="note-box warn">
+          <span class="badge">The honesty that matters most</span>
+          <p><em>“This is still an estimate, not a ruling.”</em> Intent, business inventory, debt treatment and the choice of standard are all matters for someone qualified — and the card says so on screen, not just in a comment. When your software touches a domain with real authorities in it — medicine, law, religion, tax — the most professional thing it can do is be precise about the boundary of what it is claiming.</p>
+        </div>
+
+        <div class="prose">
+          <h3>The hawl clock, and the function that returns <code>undefined</code></h3>
+          <p>Zakat is owed on wealth that stayed above the threshold for a full lunar year. So the card needs a clock: a start date, stored, that resets if you fall below. Which creates a classic React trap — a component that computes a new value on every render and writes it back will re-render forever.</p>
+        </div>
+        <div class="specimen" data-spec="hawl"></div>
+
+        <div class="check" data-answer="Three distinct values with three meanings: a date means 'start the clock today', null means 'you fell below, clear it', and undefined means 'nothing needs to change'. The third is the important one — returning undefined lets the caller skip the write entirely, which is what prevents a render loop. A boolean could not carry all three.">
+          <div class="q">Check yourself: <code>nextHawlStart</code> can return a date, <code>null</code>, or <code>undefined</code>. Why does it need all three?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch8" data-title="Recurring &amp; AI">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 8</div>
+          <h2>Two features defined by what they refuse to do</h2>
+          <p class="lede">Recurring transactions do not post themselves. The AI never sees your data unless you ask it to.</p>
+        </div>
+        <div class="specimen" data-spec="recurring"></div>
+
+        <div class="note-box">
+          <span class="badge">The reasoning</span>
+          <p>Automatic posting is the obvious feature and it is the wrong one here. Silently writing money movements you never saw makes every balance in the app slightly suspect — and a net-worth tracker you do not fully trust is worse than no tracker, because you will act on it anyway. Proposing and confirming costs one tap and buys total confidence in the numbers.</p>
+          <p style="margin-top:10px">The <code>MAX_CATCH_UP</code> cap is the same instinct applied to the failure case: a rule ignored for two years should not dump a hundred back-dated rows into your history the moment you open the app.</p>
+        </div>
+
+        <div class="prose">
+          <h3>The AI layer, and Google's moving target</h3>
+        </div>
+        <div class="specimen" data-spec="ai"></div>
+
+        <div class="note-box warn">
+          <span class="badge">Rule</span>
+          <p><strong>Never pin a dated model id.</strong> <code>gemini-2.5-flash</code> looks stable and is a time bomb — providers retire dated ids on their own schedule and your app dies on a day you were not deploying. The <code>-latest</code> aliases are maintained by Google to point at the current model; use those, and keep a fallback chain behind them for the day even an alias moves.</p>
+        </div>
+
+        <div class="check" data-answer="Nothing about the app stops working. There is no key by default and the AI features are additive — quick-add by text, dictation and receipt photos. Everything else, including every number on every screen, is computed locally. The key is also one of exactly two things never uploaded by sync; the other is your theme.">
+          <div class="q">Check yourself: a user never enters a Gemini key. What stops working?</div>
+          <button class="reveal" type="button">Show answer</button>
+          <div class="a"></div>
+        </div>
+      </section>
+
+      <hr class="rule">
+
+      <section id="ch9" data-title="Change it yourself">
+
+        <div class="prose">
+          <div class="eyebrow">Chapter 9</div>
+          <h2>Change it yourself</h2>
+          <p class="lede">Four exercises, in order of difficulty. Each one uses a different layer of what you have just read.</p>
+          <ol>
+            <li><strong>Add a spending subcategory.</strong> <code>TAXONOMY</code> in <code>shared/model.js</code>. One line, and it appears everywhere — which is the payoff of a single source of truth.</li>
+            <li><strong>Add a karat.</strong> 18-karat gold is common in Egypt. <code>karatPrice</code> already handles any karat arithmetically; find where the pickers offer the fixed list and extend it. Then check the Prices screen still reads sensibly.</li>
+            <li><strong>Add a currency.</strong> Euros, say. <code>unitRate</code>, the price fetch, the plausibility gate, the unit label, and the pickers. Notice how much of the app you do <em>not</em> have to touch — that is what the valuation layer bought you.</li>
+            <li><strong>Add a collection.</strong> Track subscriptions as first-class records. Add to <code>COLLECTIONS</code>, then <code>migrate</code>, then a merge test proving two devices editing different subscriptions both keep their work. Every skill in this tour, in one feature.</li>
+          </ol>
+
+          <h3>Running it</h3>
+          <div class="cmd"><code>npm run dev</code><button class="copy" type="button" data-copy="npm run dev">copy</button></div>
+          <p>That serves the frontend only, and sync correctly reports itself unavailable — a supported way to work on the UI. For the API you need <code>vercel dev</code>.</p>
+          <div class="cmd"><code>npm test</code><button class="copy" type="button" data-copy="npm test">copy</button></div>
+          <p>Forty-six tests over five files: merge, migration, the sync push path, valuation, and zakat. Run them before every change to any of those five.</p>
+
+          <h3>Habits that separate professionals from hobbyists</h3>
+          <ul>
+            <li><strong>Ask “now or then?” about every stored number.</strong> Chapter 3 is one instance of a question worth asking in every system you build.</li>
+            <li><strong>Bound every number you did not compute yourself.</strong> Two lines of plausibility check beat a week of wondering why the portfolio jumped.</li>
+            <li><strong>Soft-delete anything that syncs.</strong> A hard delete cannot travel, and undeletion is the most confusing bug a user can experience.</li>
+            <li><strong>Say what you do not know.</strong> “fallback baseline”, “estimate, not a ruling”, “sync unavailable” — three places where this app declines to bluff, and each one buys trust in everything else it says.</li>
+            <li><strong>When you cannot explain it, you do not understand it yet.</strong> Try explaining why <code>mergeState</code> is symmetric out loud. The gaps announce themselves.</li>
+          </ul>
+
+          <div class="note-box">
+            <span class="badge">Next</span>
+            <p>Name any file in the repo — <code>Activity.jsx</code>, <code>parse.js</code>, <code>api/index.js</code>, <code>exportImport.js</code> — and it can get the same line-by-line treatment at whatever depth you want.</p>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div id="pop" role="tooltip"></div>
+
+<script>
+/* ============ specimens: real code from the repo, with per-line notes ============ */
+const SPECS = {
+  "valuationHead": {
+    "path": "src/lib/valuation.js",
+    "what": "the rule, stated before the code",
+    "lines": [
+      [
+        3,
+        "   The important rule lives here. An account's *balance* is worth whatever",
+        "One file owns the distinction, and it announces that in its first sentence."
+      ],
+      [
+        5,
+        "   *transaction*, though, happened at a moment in time, and re-pricing it later",
+        "The other half of the rule. A transaction is an event, not a holding."
+      ],
+      [
+        6,
+        "   silently rewrites history: before this, a $100 dinner logged last year grew",
+        "The bug, described concretely enough that you can picture it. \"Silently\" is the operative word — nothing failed, the numbers were simply wrong."
+      ],
+      [
+        8,
+        "   with the gold price. So every transaction records the EGP rate that applied",
+        "And the fix, in one clause: capture at write time."
+      ],
+      [
+        11,
+        "export const OZ_TO_GRAM = 31.1034768;",
+        "Gold spot is quoted per troy ounce worldwide; Egypt trades by the gram. One constant, named, rather than 31.1 scattered through the codebase."
+      ],
+      [
+        13,
+        "export function karatPrice(prices, karat) {",
+        "Karat is a purity fraction out of 24, so the price is a straight proportion of the 24k price. Handles any karat arithmetically — the fixed list in the UI is a convenience, not a constraint."
+      ],
+      [
+        18,
+        "export function unitRate(unit, karat, prices) {",
+        "EGP per one unit of anything: one dollar, one gram at that karat, one pound. Every valuation in the app funnels through here."
+      ],
+      [
+        21,
+        "  return 1;",
+        "EGP is worth one EGP. Making the base currency a normal case rather than a special one is what keeps the callers free of if-statements."
+      ],
+      [
+        30,
+        "export function egpValue(acc, prices) {",
+        "Balance times rate. The entire net-worth figure is this function summed over the accounts — which is why no total is ever stored."
+      ]
+    ]
+  },
+  "snapshot": {
+    "path": "src/lib/valuation.js",
+    "what": "capturing the moment, once",
+    "lines": [
+      [
+        44,
+        "/* Capture what each side of a transaction was worth at the time it was logged.",
+        "Called once, when the transaction is written. Everything afterwards reads what this stored."
+      ],
+      [
+        45,
+        "   Also copies the account names, so deleting an account later leaves the",
+        "A second job hiding in the same function, and a good one: denormalising the name is what keeps two-year-old history readable after an account is gone."
+      ],
+      [
+        47,
+        "export function snapshotSides(txn, accounts, prices) {",
+        "\"Sides\" because a transfer has two — money leaves one account and arrives in another, possibly in different units at different rates."
+      ],
+      [
+        50,
+        "  const out = { ...txn };",
+        "A copy, not a mutation. Returning a new object rather than editing the input is what makes this function safe to call from a React state updater."
+      ],
+      [
+        51,
+        "  if (from) {",
+        "Guarded, because income has no from-side and expenses have no to-side. One function handles all three transaction types."
+      ],
+      [
+        54,
+        "    out.fromName = from.name;",
+        "The name at the time. If you rename the account later, old rows keep the old name — arguably the more honest record of what happened."
+      ],
+      [
+        55,
+        "    out.fromRate = rateFor(from, prices);",
+        "The line the whole chapter is about. Four characters of assignment, and last March stops moving."
+      ]
+    ]
+  },
+  "sideRate": {
+    "path": "src/lib/valuation.js",
+    "what": "four fallbacks, in order of trustworthiness",
+    "lines": [
+      [
+        66,
+        "/* The rate to use when valuing one side of a stored transaction:",
+        "The chain is documented before it is written, which is what makes it reviewable."
+      ],
+      [
+        69,
+        "   and only then a bare 1:1 — which is correct for EGP and the least wrong",
+        "Note the phrasing: not \"correct\", but \"the least wrong guess\". Naming a fallback as a guess is how you stop it being mistaken for data."
+      ],
+      [
+        71,
+        "  const snap = txn[side + \"Rate\"];",
+        "String concatenation to build the field name, so one function serves both sides. Slightly clever; worth it here because the alternative is two near-identical functions that can drift."
+      ],
+      [
+        72,
+        "  if (snap != null && isFinite(snap)) return Number(snap);",
+        "The snapshot wins whenever it exists. isFinite guards against NaN and Infinity sneaking through from an old bad write."
+      ],
+      [
+        74,
+        "  if (acc) return rateFor(acc, prices);",
+        "Second choice: the account still exists, so use its live rate. Only reached for transactions written before snapshots existed."
+      ],
+      [
+        76,
+        "  if (unit) return unitRate(txn[side + \"Unit\"], txn[side + \"Karat\"], prices);",
+        "Third: the account is gone but we remembered its unit. Still better than assuming EGP."
+      ],
+      [
+        77,
+        "  return 1;",
+        "Last resort. Correct for the common case and explicitly acknowledged as a guess for everything else."
+      ]
+    ]
+  },
+  "model": {
+    "path": "shared/model.js",
+    "what": "the document, and why it is shaped this way",
+    "lines": [
+      [
+        1,
+        "/* Mizan data model — shared verbatim by the browser app and the sync server.",
+        "One file, two runtimes. The constraint that follows is what makes that possible."
+      ],
+      [
+        3,
+        "   Keep this file free of DOM, React, Node and network APIs: `api/` imports it",
+        "A rule you can actually enforce in review. A single window. or require() here breaks whichever side you are not currently testing."
+      ],
+      [
+        9,
+        "   Sync merges two documents that were both edited offline, so \"which copy is",
+        "The reason every record carries a timestamp. Per-document resolution would throw away a whole day's work to settle one field."
+      ],
+      [
+        11,
+        "   `updatedAt`, and deletes are soft (`deletedAt`) — a hard delete is invisible",
+        "The key insight about distributed deletion: absence carries no information, so it cannot travel between devices."
+      ],
+      [
+        19,
+        "export const COLLECTIONS = {",
+        "Six collections, each with the field that identifies a record. The merge is generic over this map, so adding a seventh collection is one line here rather than a new branch in the merge."
+      ],
+      [
+        24,
+        "  history: \"d\",       // one net-worth snapshot per calendar day",
+        "Identified by date rather than a random id. That makes it naturally idempotent — recomputing today's snapshot overwrites rather than duplicates."
+      ],
+      [
+        29,
+        "export const SCALARS = [\"targets\", \"budgets\", \"zakat\"];",
+        "Maps replaced wholesale rather than merged per record, with their timestamps in meta. Three settings-shaped things where per-key merging would buy nothing."
+      ],
+      [
+        31,
+        "export const TOMBSTONE_TTL_DAYS = 120;",
+        "A bet, written down: no device stays offline for four months. State your assumptions as named constants and they stay arguable."
+      ],
+      [
+        35,
+        "export const HISTORY_LIMIT = 400;",
+        "A year of daily snapshots is enough for every chart in the app, and it keeps the synced document comfortably small. Retention policy as a number, in the file that enforces it."
+      ]
+    ]
+  },
+  "mergeCollection": {
+    "path": "shared/model.js",
+    "what": "the merge, at record level",
+    "lines": [
+      [
+        172,
+        "function mergeCollection(a = [], b = [], idField) {",
+        "Generic over the id field, so one function merges accounts, transactions, debts, recurring rules and both day-series."
+      ],
+      [
+        173,
+        "  const out = new Map();",
+        "A Map keyed by id. Two lists in, one deduplicated list out."
+      ],
+      [
+        174,
+        "  const consider = (r) => {",
+        "One record at a time, from either side. Because this closure treats both sides identically, the result cannot depend on which list was passed first — that is what symmetry means in practice."
+      ],
+      [
+        175,
+        "    if (!r || r[idField] == null) return;",
+        "Malformed records are dropped rather than crashing the merge. A merge that throws on one bad row loses the whole document."
+      ],
+      [
+        181,
+        "    if (rb > ra) out.set(key, r);",
+        "Last write wins, by timestamp. The entire conflict-resolution policy is this line."
+      ],
+      [
+        182,
+        "    else if (rb === ra && r.deletedAt && !cur.deletedAt) out.set(key, r);",
+        "The tie-break: a tombstone beats a same-millisecond edit. Without it, a delete could be silently undone and the row would reappear with no explanation."
+      ],
+      [
+        184,
+        "  a.forEach(consider);",
+        "Both sides through the same door."
+      ],
+      [
+        186,
+        "  return [...out.values()];",
+        "Back to an array. Note that the ORDER here comes from Map insertion — which is why mergeState re-sorts the collections that care about order on the way out."
+      ]
+    ]
+  },
+  "mergeState": {
+    "path": "shared/model.js",
+    "what": "the whole document, and two things easy to miss",
+    "lines": [
+      [
+        195,
+        "export function mergeState(a, b) {",
+        "The function the server calls. It knows nothing about who edited what."
+      ],
+      [
+        196,
+        "  const left = migrate(a);",
+        "Both sides normalised first. Never merge raw input — a document from an old version has a different shape and would merge into nonsense."
+      ],
+      [
+        200,
+        "  for (const [key, idField] of Object.entries(COLLECTIONS)) {",
+        "Driven entirely by the COLLECTIONS map. Add a collection there and the merge handles it with no change here."
+      ],
+      [
+        211,
+        "    out[key] = out[key].sort((x, y) => (x.d < y.d ? -1 : 1)).slice(-HISTORY_LIMIT);",
+        "Two jobs in one line. Merging interleaves two devices' day-series, so they need re-sorting — and the slice enforces retention at merge time, which is the only place both devices are guaranteed to agree on."
+      ],
+      [
+        214,
+        "  out.transactions.sort((x, y) => (y.date || \"\").localeCompare(x.date || \"\") || (y.updatedAt || 0) - (x.updatedAt || 0));",
+        "Newest first, matching how the Activity tab reads them. Sorting here rather than in the component means every consumer gets the same order without asking."
+      ],
+      [
+        216,
+        "  return prune(out);",
+        "Every merge also drops expired tombstones, so the document self-maintains rather than needing a separate cleanup job."
+      ],
+      [
+        220,
+        "export function prune(state, now = Date.now()) {",
+        "now as a defaulted parameter rather than called inside. That one habit is what makes a time-dependent function testable."
+      ],
+      [
+        224,
+        "    out[key] = (state[key] || []).filter((r) => !r.deletedAt || (Number(r.updatedAt) || 0) > cutoff);",
+        "Keep live records always; keep tombstones only while they are younger than the cutoff."
+      ]
+    ]
+  },
+  "prices": {
+    "path": "src/lib/prices.js",
+    "what": "three routes, ordered by what they cost the user",
+    "lines": [
+      [
+        3,
+        "   Three routes, in order of how much they cost the user:",
+        "Ordered by cost to the user, not by accuracy or convenience. That is a deliberate and slightly unusual choice, and it is stated so nobody reorders them casually."
+      ],
+      [
+        5,
+        "   1. /api/prices — our own Vercel function. It fetches server-side, so the",
+        "Server-side fetching sidesteps CORS entirely, and one cached response serves everyone."
+      ],
+      [
+        10,
+        "   3. the AI provider with search grounding — last resort, costs tokens, and is",
+        "The most accurate route for this specific market is also the most expensive, and therefore last. Accuracy is not the only axis."
+      ],
+      [
+        16,
+        "export const SEED_PRICES = {",
+        "A hard-coded baseline so the app always has something to multiply by. Without it a first launch with no network renders nothing at all."
+      ],
+      [
+        19,
+        "  source: \"seed\",",
+        "And it is labelled. The Prices screen shows this, so a stale figure is never mistaken for a live one."
+      ],
+      [
+        27,
+        "/* plausibility gates — a bad parse should never silently reprice a portfolio */",
+        "Two lines that stop a whole class of disaster."
+      ],
+      [
+        28,
+        "export const inGoldRange = (n) => n > 2000 && n < 20000;",
+        "A parser that grabbed a page count or a percentage returns something numerically valid and financially absurd. Bounding to what is plausible turns that into a clean failure."
+      ],
+      [
+        36,
+        "  if (!inGoldRange(Number(j.gold24)) || !inFxRange(Number(j.usdEgp))) throw new Error(\"proxy-range\");",
+        "Throwing here is how a failed gate falls through to the next route. Rejecting bad data is only useful if something else is ready to try."
+      ]
+    ]
+  },
+  "zakat": {
+    "path": "src/lib/zakat.js",
+    "what": "threshold, base, and the boundary of the claim",
+    "lines": [
+      [
+        3,
+        "   Two things the old card got wrong. It only knew the gold nisab (85g), which",
+        "The file opens by naming its own past mistakes. That is worth more to a future reader than any description of what it does now."
+      ],
+      [
+        5,
+        "   mixed cash-and-gold wealth is to use the silver nisab (595g), which is much",
+        "The domain fact: two thresholds exist, and the silver one is far lower, so it catches you sooner. Choosing the lenient one by default was the bug."
+      ],
+      [
+        10,
+        "   This is still an estimate, not a ruling. Intent, business inventory,",
+        "The boundary of the claim, stated in the code and repeated on screen. When your software touches a domain with real authorities, this is the most professional thing it can do."
+      ],
+      [
+        21,
+        "export function nisabEgp(standard, prices) {",
+        "The threshold in EGP, which moves with the metal price — so whether you owe zakat can change without your wealth changing at all."
+      ],
+      [
+        24,
+        "    if (!silver) return { value: 0, unavailable: true, grams: NISAB_GRAMS.silver, metal: \"silver\" };",
+        "Missing data is reported, not guessed. Returning a flag rather than a silently wrong threshold is what lets the caller decide."
+      ],
+      [
+        32,
+        "export function zakatBase({ liquidTotal, illiquidTotal, liabilities, includeIlliquid }) {",
+        "Destructured parameters, so call sites read as named arguments. Four positional numbers here would be a bug waiting for someone to swap two."
+      ],
+      [
+        33,
+        "  const gross = liquidTotal + (includeIlliquid ? illiquidTotal : 0);",
+        "Property held for use is normally exempt; property held to resell is not. The toggle exists because only the user knows which they have."
+      ],
+      [
+        34,
+        "  return Math.max(0, gross - liabilities);",
+        "Debts subtract, and the floor is zero. Negative zakat is not a refund."
+      ],
+      [
+        50,
+        "  const effective = nisab.unavailable ? nisabEgp(\"gold\", prices) : nisab;",
+        "The fallback for a missing silver price: use gold rather than claiming everyone is below an unknown threshold. Failing toward the answer that is merely lenient, not the one that is meaningless."
+      ],
+      [
+        71,
+        "    due: above ? base * 0.025 : 0,",
+        "Two and a half percent, and only if above the threshold. The whole calculation ends in one multiplication — everything before it was deciding whether it applies."
+      ]
+    ]
+  },
+  "hawl": {
+    "path": "src/lib/zakat.js",
+    "what": "the lunar-year clock, and a return value that means nothing",
+    "lines": [
+      [
+        54,
+        "  const dueDate = start ? addDays(start, LUNAR_YEAR_DAYS) : null;",
+        "A lunar year, not 365 days — about eleven days shorter, so the due date drifts earlier every Gregorian year. Using the wrong year length here would be wrong by a fortnight and nobody would notice."
+      ],
+      [
+        57,
+        "  const hawlComplete = !!(above && start && daysHeld >= LUNAR_YEAR_DAYS);",
+        "Three conditions: still above the threshold, a clock was started, and a full year has passed. Falling below at any point resets it, which is the next function's job."
+      ],
+      [
+        70,
+        "    progress: start ? Math.min(1, Math.max(0, daysHeld / LUNAR_YEAR_DAYS)) : 0,",
+        "Clamped to 0..1 so the progress ring cannot render past full when the due date has passed."
+      ],
+      [
+        75,
+        "/* What the stored hawlStart should become, given today's standing.",
+        "A pure decision function, separated from the writing. That split is what makes the next line possible."
+      ],
+      [
+        77,
+        "   write and avoid a render loop. */",
+        "The React trap named explicitly: compute-and-write-on-every-render is an infinite loop, and this comment is the guard rail."
+      ],
+      [
+        79,
+        "  if (status.above && !status.hawlStart) return today;   // crossed nisab: start the clock",
+        "Case one: a date to store."
+      ],
+      [
+        80,
+        "  if (!status.above && status.hawlStart) return null;    // fell below: the year resets",
+        "Case two: null, meaning \"clear the stored value\". Distinct from case three."
+      ],
+      [
+        81,
+        "  return undefined;",
+        "Case three, and the reason the function exists: undefined means \"nothing needs to change\", so the caller skips the write entirely. Three states, three return values, no ambiguity."
+      ]
+    ]
+  },
+  "recurring": {
+    "path": "src/lib/recurring.js",
+    "what": "a feature that refuses to be automatic",
+    "lines": [
+      [
+        3,
+        "   Deliberately not automatic. The app proposes what is due and you confirm;",
+        "The decision, first line. Automatic posting is the obvious feature and the wrong one."
+      ],
+      [
+        4,
+        "   silently writing money movements you never saw would make the balances",
+        "The reason. A net-worth tracker you do not fully trust is worse than none, because you act on it anyway."
+      ],
+      [
+        6,
+        "   A rule that has been ignored for months proposes each missed occurrence",
+        "The failure case handled deliberately rather than discovered later."
+      ],
+      [
+        12,
+        "export const FREQUENCIES = [",
+        "Pairs of value and label, so the picker and the logic read from one list and cannot disagree about what \"biweekly\" means."
+      ],
+      [
+        20,
+        "const MAX_CATCH_UP = 12;",
+        "A rule ignored for two years should not dump a hundred back-dated rows into your history the moment you open the app."
+      ],
+      [
+        22,
+        "export function advance(date, freq) {",
+        "One date in, the next occurrence out. Pure, so the catch-up loop is just repeated calls — and so it is trivially testable."
+      ],
+      [
+        26,
+        "    case \"quarterly\": return addMonths(date, 3);",
+        "Months, not 90 days. Calendar arithmetic and elapsed-time arithmetic are different things, and mixing them is how the 31st of a month drifts."
+      ]
+    ]
+  },
+  "ai": {
+    "path": "src/lib/ai.js",
+    "what": "one interface, and a defence against retired models",
+    "lines": [
+      [
+        3,
+        "   aiComplete(spec, cfg) -> string of model output text",
+        "One function, one shape. Text, dictation and receipt photos all route through it — which is why adding a provider touches this file and nothing else."
+      ],
+      [
+        10,
+        "   The key never leaves the browser except to Google's API.",
+        "A privacy claim precise enough to be checked. Sync explicitly excludes the key and the theme; everything else in the document travels."
+      ],
+      [
+        12,
+        "   Model resilience: Google renames and retires model IDs, so pinning one is a",
+        "The trap named. This is not hypothetical — dated ids get retired on the provider's schedule, not yours."
+      ],
+      [
+        13,
+        "   time bomb. In \"auto\" mode we ask ListModels which Flash models this key can",
+        "Asking the API what this key can actually use, rather than assuming. Different keys have different access."
+      ],
+      [
+        18,
+        "export const DEFAULT_GEMINI_MODEL = \"auto\";",
+        "The default is the resilient path, not a specific model. Defaults are the setting almost nobody changes, so they should be the safe one."
+      ],
+      [
+        21,
+        "  \"gemini-flash-latest\",",
+        "A rolling alias, maintained by Google to point at the current model. This is the id you want in production."
+      ],
+      [
+        23,
+        "  \"gemini-2.5-flash\",",
+        "A dated id, offered but not defaulted. Fine for pinning a behaviour you are debugging; a time bomb if you ship it."
+      ],
+      [
+        27,
+        "/* static safety net when ListModels itself is unreachable — rolling aliases",
+        "A fallback for the fallback. Two layers is not paranoia when the failure mode is every AI feature dying at once."
+      ]
+    ]
+  }
+};
+
+/* ============ tiny syntax highlighter (escapes first, then tokenises) ============ */
+const KEYWORDS = new Set(["const","let","var","function","return","if","else","for","of","in","new","await","async","export","import","from","type","interface","class","extends","implements","try","catch","finally","throw","null","undefined","true","false","void","continue","break","this","as","default","typeof","Record","Promise","Set","Number","String","Boolean"]);
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function highlight(src) {
+  let out = "", i = 0;
+  while (i < src.length) {
+    const rest = src.slice(i);
+    let m;
+    if ((m = rest.match(/^\/\/.*/)) || (m = rest.match(/^\/\*[\s\S]*?\*\//)) || (m = rest.match(/^\*.*/)) || (m = rest.match(/^\/\*\*.*/))) {
+      out += '<span class="tok-c">' + esc(m[0]) + "</span>"; i += m[0].length; continue;
+    }
+    if ((m = rest.match(/^"(?:[^"\\]|\\.)*"/)) || (m = rest.match(/^'(?:[^'\\]|\\.)*'/)) || (m = rest.match(/^`(?:[^`\\]|\\.)*`/))) {
+      out += '<span class="tok-s">' + esc(m[0]) + "</span>"; i += m[0].length; continue;
+    }
+    if ((m = rest.match(/^\b\d+(?:\.\d+)?\b/))) {
+      out += '<span class="tok-n">' + esc(m[0]) + "</span>"; i += m[0].length; continue;
+    }
+    if ((m = rest.match(/^[A-Za-z_$][A-Za-z0-9_$]*/))) {
+      const w = m[0];
+      const after = rest.slice(w.length);
+      if (KEYWORDS.has(w)) out += '<span class="tok-k">' + esc(w) + "</span>";
+      else if (/^\s*\(/.test(after)) out += '<span class="tok-f">' + esc(w) + "</span>";
+      else out += esc(w);
+      i += w.length; continue;
+    }
+    out += esc(src[i]); i += 1;
+  }
+  return out;
+}
+
+/* ============ render specimens ============ */
+document.querySelectorAll(".specimen").forEach((host) => {
+  const spec = SPECS[host.dataset.spec];
+  if (!spec) return;
+  const noted = spec.lines.map((l, idx) => (l[2] ? idx : -1)).filter((i) => i >= 0);
+
+  const head = document.createElement("div");
+  head.className = "spec-head";
+  head.innerHTML =
+    '<span class="spec-path">' + esc(spec.path) + "</span>" +
+    '<span class="spec-what">' + esc(spec.what) + "</span>" +
+    '<span class="spec-steps">' +
+      '<button class="step-btn" data-dir="-1" type="button">← Prev</button>' +
+      '<span class="step-count"></span>' +
+      '<button class="step-btn" data-dir="1" type="button">Next →</button>' +
+    "</span>";
+
+  const body = document.createElement("div");
+  body.className = "spec-body";
+  const codePane = document.createElement("div");
+  codePane.className = "code-pane";
+  const pre = document.createElement("pre");
+  pre.className = "code";
+  spec.lines.forEach((l, idx) => {
+    const row = document.createElement("div");
+    row.className = "cl" + (l[2] ? " has-note" : "");
+    if (l[2]) { row.tabIndex = 0; row.setAttribute("role", "button"); row.setAttribute("aria-label", "Explain line " + l[0]); }
+    row.dataset.idx = String(idx);
+    row.innerHTML = '<span class="n">' + l[0] + '</span><span class="dot">•</span><span class="t">' + highlight(l[1]) + "</span>";
+    pre.appendChild(row);
+  });
+  codePane.appendChild(pre);
+
+  const notePane = document.createElement("div");
+  notePane.className = "note-pane";
+  notePane.innerHTML = '<div class="nl">Note</div><div class="nt"></div>';
+
+  body.appendChild(codePane);
+  body.appendChild(notePane);
+  host.appendChild(head);
+  host.appendChild(body);
+
+  let cursor = -1;
+  const rows = pre.querySelectorAll(".cl");
+  const nl = notePane.querySelector(".nl");
+  const nt = notePane.querySelector(".nt");
+  const count = head.querySelector(".step-count");
+  const prevB = head.querySelector('[data-dir="-1"]');
+  const nextB = head.querySelector('[data-dir="1"]');
+
+  function show(idx, scroll) {
+    rows.forEach((r) => r.classList.remove("on"));
+    if (idx < 0) {
+      nl.textContent = "Note";
+      nt.innerHTML = '<span class="hint">Click a line marked with a dot, or press Next, to read what it does.</span>';
+      count.textContent = noted.length + " notes";
+      prevB.disabled = true; nextB.disabled = false;
+      cursor = -1;
+      return;
+    }
+    cursor = idx;
+    const row = rows[idx];
+    row.classList.add("on");
+    if (scroll) row.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    nl.textContent = "Line " + spec.lines[idx][0];
+    nt.textContent = spec.lines[idx][2];
+    const pos = noted.indexOf(idx);
+    count.textContent = (pos + 1) + " / " + noted.length;
+    prevB.disabled = pos <= 0;
+    nextB.disabled = pos >= noted.length - 1;
+  }
+  show(-1, false);
+
+  pre.addEventListener("click", (e) => {
+    const row = e.target.closest(".cl.has-note");
+    if (row) show(Number(row.dataset.idx), false);
+  });
+  pre.addEventListener("keydown", (e) => {
+    const row = e.target.closest(".cl.has-note");
+    if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); show(Number(row.dataset.idx), false); }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const pos = noted.indexOf(cursor);
+      const nxt = e.key === "ArrowDown" ? Math.min(pos + 1, noted.length - 1) : Math.max(pos - 1, 0);
+      show(noted[nxt < 0 ? 0 : nxt], true);
+    }
+  });
+  head.addEventListener("click", (e) => {
+    const b = e.target.closest(".step-btn");
+    if (!b) return;
+    const dir = Number(b.dataset.dir);
+    const pos = noted.indexOf(cursor);
+    const nxt = pos === -1 ? 0 : Math.min(Math.max(pos + dir, 0), noted.length - 1);
+    show(noted[nxt], true);
+  });
+});
+
+/* ============ table of contents + scrollspy ============ */
+const secs = [...document.querySelectorAll("section[data-title]")];
+const toc = document.getElementById("toc");
+secs.forEach((s, i) => {
+  const a = document.createElement("a");
+  a.href = "#" + s.id;
+  a.innerHTML = '<span class="num">' + String(i).padStart(2, "0") + "</span><span>" + s.dataset.title + "</span>";
+  toc.appendChild(a);
+});
+const links = [...toc.querySelectorAll("a")];
+const spy = new IntersectionObserver((entries) => {
+  entries.forEach((en) => {
+    if (!en.isIntersecting) return;
+    const i = secs.indexOf(en.target);
+    links.forEach((l, j) => l.classList.toggle("active", j === i));
+  });
+}, { rootMargin: "-15% 0px -70% 0px" });
+secs.forEach((s) => spy.observe(s));
+
+/* ============ trace animation ============ */
+const hops = [...document.querySelectorAll("#hops .hop")];
+const playBtn = document.getElementById("playTrace");
+if (playBtn) playBtn.addEventListener("click", function () {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  hops.forEach((h) => h.classList.remove("lit"));
+  this.disabled = true;
+  const step = (i) => {
+    if (i >= hops.length) { this.disabled = false; this.textContent = "Run it again"; return; }
+    hops[i].classList.add("lit");
+    setTimeout(() => step(i + 1), reduce ? 0 : 520);
+  };
+  step(0);
+});
+
+/* ============ checks ============ */
+document.querySelectorAll(".check").forEach((c) => {
+  c.querySelector(".a").textContent = c.dataset.answer;
+  c.querySelector(".reveal").addEventListener("click", () => c.classList.add("open"));
+});
+
+/* ============ copy buttons ============ */
+document.querySelectorAll(".copy").forEach((b) => {
+  b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "copied"; }
+    catch { b.textContent = "select it"; }
+    setTimeout(() => (b.textContent = "copy"), 1400);
+  });
+});
+
+/* ============ glossary popover ============ */
+const pop = document.getElementById("pop");
+let popFor = null;
+function hidePop() { pop.style.display = "none"; popFor = null; }
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button.term");
+  if (!t) { if (!e.target.closest("#pop")) hidePop(); return; }
+  if (popFor === t) { hidePop(); return; }
+  pop.innerHTML = "<b>" + esc(t.textContent) + "</b> — " + esc(t.dataset.def);
+  pop.style.display = "block";
+  const r = t.getBoundingClientRect();
+  const top = r.bottom + window.scrollY + 8;
+  const left = Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 16);
+  pop.style.top = top + "px";
+  pop.style.left = Math.max(8, left) + "px";
+  popFor = t;
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hidePop(); });
+window.addEventListener("scroll", () => { if (popFor) hidePop(); }, { passive: true });
+
+/* ============ theme toggle ============ */
+const btn = document.getElementById("themeBtn");
+if (btn) btn.addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const now = cur ? cur : (sysDark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", now === "dark" ? "light" : "dark");
+});
+
+</script>
+</body>
+</html>

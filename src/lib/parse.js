@@ -3,9 +3,15 @@
    Two parsers live here: the AI one, and a deliberately dumb offline
    heuristic. The offline path exists because a finance app that refuses to
    record a coffee because a model was unreachable is worse than one that
-   records it roughly and asks you to check. */
+   records it roughly and asks you to check.
+
+   Both consult merchant memory (memory.js) — your own ledger, indexed by the
+   words in its notes. It only ever fills a blank: the model's answer and
+   anything you typed outrank it, so memory sharpens the guess without ever
+   quietly contradicting a stated one. */
 
 import { TAXONOMY } from "../../shared/model.js";
+import { applyMemory, recall } from "./memory.js";
 
 export function withTimeout(p, ms) {
   let t;
@@ -17,9 +23,17 @@ export function withTimeout(p, ms) {
 
 const stripFences = (s) => s.replace(/```json/gi, "").replace(/```/g, "");
 
-/* ---------- transactions ---------- */
-export async function parseEntry(accs, { text, image, payFrom }, ai) {
+/* ---------- transactions ----------
+
+   `image` is one attachment, `files` several, `docText` the characters of
+   something already readable without a model — a PDF whose text layer came
+   out clean, or a CSV. When several files are passed they are treated as one
+   document (an invoice over three pages, a receipt photographed in halves);
+   several *separate* receipts go through parseReceipts below, one call each,
+   because merging them into one call is how a line gets counted twice. */
+export async function parseEntry(accs, { text, image, files, docText, payFrom, memory }, ai) {
   const today = new Date().toISOString().slice(0, 10);
+  const atts = [image, ...(files || [])].filter(Boolean);
   const acctList = accs.map((a) => ({ id: a.id, name: a.name, unit: a.unit, class: a.assetClass, liability: !!a.isLiability }));
   const payLine = payFrom
     ? `The paying account is id "${payFrom}" — use it as fromId for every expense. `
@@ -43,11 +57,16 @@ export async function parseEntry(accs, { text, image, payFrom }, ai) {
     payLine +
     "Use today's date unless the note or receipt says otherwise.";
 
-  const prompt = image
-    ? instructions + (text ? `\n\nNote: "${text}"` : "\n\nThe image is a receipt — split its items into per-category transactions.")
-    : instructions + `\n\nNote: "${text}"`;
+  let prompt = instructions;
+  if (atts.length > 1)
+    prompt +=
+      ` The ${atts.length} attached pages are ONE document — pages of the same receipt, invoice or order. ` +
+      "Read them together and never count the same line twice; a total that appears on more than one page is still one total.";
+  else if (atts.length === 1 && !text) prompt += " The attachment is a receipt — split its items into per-category transactions.";
+  if (docText) prompt += `\n\nAttached document (already text, read it as the receipt/invoice):\n${docText.slice(0, 24000)}`;
+  if (text) prompt += `\n\nNote: "${text}"`;
 
-  const out = await ai({ prompt, image: image || undefined });
+  const out = await ai({ prompt, files: atts.length ? atts : undefined });
   const cleaned = stripFences(out);
   const arrMatch = cleaned.match(/\[[\s\S]*\]/);
   const objMatch = cleaned.match(/\{[\s\S]*\}/);
@@ -78,13 +97,46 @@ export async function parseEntry(accs, { text, image, payFrom }, ai) {
       note: (p.note || "").toString().slice(0, 80),
     };
   };
-  const list = raw.map(norm).filter((t) => t.fromAmount || t.toAmount);
+  const exists = (id) => accs.some((a) => a.id === id);
+  const list = raw
+    .map(norm)
+    .map((t) => (memory ? applyMemory(memory, t, { accountExists: exists }) : t))
+    .filter((t) => t.fromAmount || t.toAmount);
   if (!list.length) throw new Error("empty");
   return list;
 }
 
+/* Several receipts in one go.
+
+   The failure this is shaped around is not a model failure, it is an
+   arithmetic one. Three receipts sent in a single call come back as one blur
+   of line items with the totals silently pooled; sent one call each, every
+   receipt keeps its own store, its own date and its own total, and a receipt
+   that cannot be read costs its own rows instead of the whole batch. Reading
+   is sequential for the same reason the statement sweep is: a burst of
+   parallel vision calls is exactly what a free-tier key answers with 429s. */
+export async function parseReceipts(accs, { items, text, payFrom, memory }, ai, onProgress) {
+  const list = (items || []).filter((it) => it && ((it.files && it.files.length) || it.docText));
+  if (!list.length) throw new Error("empty-input");
+
+  const rows = [];
+  const failed = [];
+  for (let i = 0; i < list.length; i++) {
+    if (onProgress) onProgress({ done: i, of: list.length, name: list[i].name });
+    try {
+      const got = await parseEntry(accs, { ...list[i], text, payFrom, memory }, ai);
+      rows.push(...got.map((r) => ({ ...r, _source: list[i].name })));
+    } catch (e) {
+      failed.push({ name: list[i].name || `file ${i + 1}`, error: (e && e.message) || "failed" });
+    }
+  }
+  if (onProgress) onProgress({ done: list.length, of: list.length });
+  if (!rows.length) throw new Error(failed.length ? "all-failed" : "empty");
+  return { rows, failed };
+}
+
 /* ---------- offline heuristic ---------- */
-export function localParse(accs, text) {
+export function localParse(accs, text, memory) {
   const t = " " + text.toLowerCase() + " ";
   const today = new Date().toISOString().slice(0, 10);
   let amount = 0;
@@ -97,9 +149,20 @@ export function localParse(accs, text) {
   const incomeW = ["salary", "income", "received", "refund", "راتب", "دخل", "استلمت", "حصلت"];
   const goldW = ["gold", "دهب", "ذهب", "جرام", "عيار"];
   const transferW = ["transfer", "move", "into clouds", "to clouds", "buy", "bought", "اشتريت", "حولت", "حول", "اشترى"];
+
+  /* What this note reminds the ledger of, if anything. It answers only where
+     the keyword table below has nothing to say — the table is about words
+     everyone uses the same way, memory is about the ones only you do. */
+  const hit = memory ? recall(memory, text) : null;
+
   let type = "expense";
+  let signalled = true;
   if (has(incomeW)) type = "income";
   else if (has(goldW) || has(transferW)) type = "transfer";
+  else signalled = false;
+  // "gym 400" carries no keyword at all; if it has been an expense forty times
+  // there is no reason to make the user restate that
+  if (!signalled && hit) type = hit.type;
 
   const cash = accs.find((a) => a.assetClass === "Cash" && !a.isLiability && a.unit === "EGP") || accs[0];
   const mm = accs.find((a) => a.assetClass === "Money market") || accs[0];
@@ -110,17 +173,23 @@ export function localParse(accs, text) {
       return tok.length > 2 && t.includes(tok);
     });
 
+  /* An account the note names outranks memory; memory outranks the blanket
+     "assume cash" default, which is the one that was wrong most often. */
+  const exists = (id) => id && accs.some((a) => a.id === id);
+  const named = findByName();
+  const remembered = (side) => (hit && hit.type === type && exists(hit[side]) ? accs.find((a) => a.id === hit[side]) : null);
+
   let fromId = null, toId = null, fromAmount = 0, toAmount;
   if (type === "income") {
-    toId = (findByName() || mm)?.id;
+    toId = (named || remembered("toId") || mm)?.id;
     toAmount = amount;
   } else if (type === "transfer") {
-    fromId = (findByName() || cash)?.id;
+    fromId = (named || remembered("fromId") || cash)?.id;
     fromAmount = amount;
-    const dest = has(goldW) ? goldAcc : mm;
+    const dest = has(goldW) ? goldAcc : remembered("toId") || mm;
     toId = dest ? dest.id : undefined;
   } else {
-    fromId = (findByName() || cash)?.id;
+    fromId = (named || remembered("fromId") || cash)?.id;
     fromAmount = amount;
   }
 
@@ -134,29 +203,38 @@ export function localParse(accs, text) {
   else if (has(goldW)) (category = "Investment"), (subcategory = "Gold");
   else if (has(["zakat", "زكاة", "صدقة", "sadaqah"])) (category = "Giving"), (subcategory = has(["zakat", "زكاة"]) ? "Zakat" : "Sadaqah");
 
+  // the table knows nothing about this note, but the ledger might
+  if (!category && hit && hit.type === type) {
+    category = hit.category;
+    subcategory = hit.subcategory;
+  }
+
   return { type, fromId, toId, fromAmount, toAmount, category, subcategory, date: today, note: text.slice(0, 80) };
 }
 
-export function localParseMany(accs, text) {
+export function localParseMany(accs, text, memory) {
   const chunks = text
     .split(/\n|،|,|;|\bثم\b|\band\b|\sو\s|\+/i)
     .map((s) => s.trim())
     .filter(Boolean);
   const withNum = chunks.filter((c) => /\d/.test(c));
   const src = withNum.length ? withNum : [text];
-  return src.map((c) => localParse(accs, c));
+  return src.map((c) => localParse(accs, c, memory));
 }
 
 /* ---------- bulk balance sync ---------- */
-export async function parseBalances(targets, { text, image }, ai) {
+export async function parseBalances(targets, { text, image, files, docText }, ai) {
+  const atts = [image, ...(files || [])].filter(Boolean);
   const list = targets.map((a) => ({ id: a.id, name: a.name, unit: a.unit }));
   const instr =
     "From the note and/or screenshot of a brokerage app, read the CURRENT balance of each listed holding. " +
     `Holdings as JSON: ${JSON.stringify(list)}. ` +
     "For EGP/USD holdings give the money value; for a GOLD holding give grams. " +
     'Reply with ONLY a JSON object mapping account id to number, e.g. {"a1":338564,"a3":45725}. Omit any you cannot read. No prose, no fences.';
-  const prompt = image ? instr + (text ? `\n\nNote: "${text}"` : "") : instr + `\n\nNote: "${text}"`;
-  const out = await ai({ prompt, image: image || undefined });
+  let prompt = instr;
+  if (docText) prompt += `\n\nStatement text:\n${docText.slice(0, 24000)}`;
+  if (text || !atts.length) prompt += `\n\nNote: "${text || ""}"`;
+  const out = await ai({ prompt, files: atts.length ? atts : undefined });
   const m = stripFences(out).match(/\{[\s\S]*\}/);
   if (!m) throw new Error("no-json");
   const obj = JSON.parse(m[0]);

@@ -33,6 +33,15 @@ export default defineConfig({
       // "prompt", not "autoUpdate": a silent swap can reload the app mid-entry.
       // App.jsx surfaces a "new version ready" toast instead.
       registerType: "prompt",
+      // The share target delivers a shared receipt as a POST, which only a
+      // hand-written worker can answer — so the worker is ours (src/sw.js) and
+      // the plugin only injects the precache manifest into it.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.js",
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,png,svg,ico,webmanifest}"],
+      },
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
       manifest: {
         name: "Mizan — net worth & expenses",
@@ -54,33 +63,25 @@ export default defineConfig({
         shortcuts: [
           { name: "Log a transaction", short_name: "Log", url: "/?tab=activity" },
         ],
-      },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,png,svg,ico,webmanifest}"],
-        // never let the service worker answer an API call from cache — a stale
-        // session or a stale synced document is worse than a failed request
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\//,
-            handler: "NetworkOnly",
+        /* Put Mizan in the system share sheet. A receipt photo, an Instapay
+           confirmation or a bank SMS can then be sent to the app from
+           wherever it already is, instead of the app having to be opened and
+           navigated to first — which is the step that actually gets skipped.
+           The POST is answered by src/sw.js. */
+        share_target: {
+          action: "/share",
+          method: "POST",
+          enctype: "multipart/form-data",
+          params: {
+            title: "title",
+            text: "text",
+            url: "url",
+            /* Several at once, and PDFs as well as photos: an emailed invoice
+               and a stack of receipts are both one gesture from the share
+               sheet, and quick-add now reads a stack. */
+            files: [{ name: "media", accept: ["image/*", "application/pdf", ".pdf", "text/csv", ".csv"] }],
           },
-          {
-            // cache Google Fonts so the installed app keeps its type offline
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "google-fonts-css", expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 365 } },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-files",
-              expiration: { maxEntries: 24, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        },
       },
     }),
   ],

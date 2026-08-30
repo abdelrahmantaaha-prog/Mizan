@@ -92,7 +92,10 @@ function userIsEditing() {
 
 /* status: "unavailable" | "signed-out" | "idle" | "syncing" | "offline" | "error" */
 export function useSync({ state, adopt, loaded }) {
-  const [capability, setCapability] = useState({ checked: false, sync: false, auth: false, db: false });
+  const [capability, setCapability] = useState({
+    checked: false, sync: false, auth: false, db: false,
+    telegram: { available: false, bot: "", linked: false },
+  });
   const [user, setUser] = useState(null);
   const [status, setStatus] = useState("unavailable");
   const [lastSync, setLastSync] = useState(null);
@@ -109,25 +112,34 @@ export function useSync({ state, adopt, loaded }) {
   stateRef.current = state;
 
   /* one capability probe on boot: does this deployment even have sync? */
+  const probe = useCallback(async () => {
+    try {
+      const r = await fetch(API.me, { credentials: "same-origin" });
+      if (!r.ok) throw new Error("me-" + r.status);
+      const j = await r.json();
+      setCapability({
+        checked: true,
+        sync: !!j.sync,
+        auth: !!j.auth,
+        db: !!j.db,
+        telegram: j.telegram || { available: false, bot: "", linked: false },
+      });
+      setUser(j.user || null);
+      setStatus(!j.sync ? "unavailable" : j.user ? "idle" : "signed-out");
+      return j;
+    } catch {
+      // no backend at all (plain `vite dev`, or the static build) — that is a
+      // supported way to run Mizan, so this is not an error state
+      setCapability({ checked: true, sync: false, auth: false, db: false, telegram: { available: false, bot: "", linked: false } });
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(API.me, { credentials: "same-origin" });
-        if (!r.ok) throw new Error("me-" + r.status);
-        const j = await r.json();
-        if (cancelled) return;
-        setCapability({ checked: true, sync: !!j.sync, auth: !!j.auth, db: !!j.db });
-        setUser(j.user || null);
-        setStatus(!j.sync ? "unavailable" : j.user ? "idle" : "signed-out");
-      } catch {
-        // no backend at all (plain `vite dev`, or the static build) — that is a
-        // supported way to run Mizan, so this is not an error state
-        if (!cancelled) setCapability({ checked: true, sync: false, auth: false, db: false });
-      }
-    })();
+    probe().then(() => { if (cancelled) return; });
     return () => { cancelled = true; };
-  }, []);
+  }, [probe]);
 
   const reconcile = useCallback(async (reason) => {
     if (!capability.sync || !user || busy.current) return;
@@ -241,7 +253,7 @@ export function useSync({ state, adopt, loaded }) {
   }, []);
 
   return useMemo(
-    () => ({ capability, user, status, lastSync, error, syncNow: () => reconcile("manual"), signIn, signOut, stopSync }),
-    [capability, user, status, lastSync, error, reconcile, stopSync]
+    () => ({ capability, user, status, lastSync, error, syncNow: () => reconcile("manual"), refresh: probe, signIn, signOut, stopSync }),
+    [capability, user, status, lastSync, error, reconcile, probe, stopSync]
   );
 }

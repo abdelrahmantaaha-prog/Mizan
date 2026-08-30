@@ -1,15 +1,19 @@
 /* Activity tab: quick add, the transaction ledger, and recurring rules. */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightLeft, ArrowDownToLine, Plus, Pencil, Trash2, X, Search,
-  Camera, Mic, Repeat, CalendarClock,
+  Camera, Mic, Repeat, CalendarClock, Zap, FileText, Share2, AlertTriangle, Send,
 } from "lucide-react";
 import { Card, CardTitle, Field, Modal, NumberInput, Segmented, inputCls, useToast, useAI, EmptyNote } from "./ui.jsx";
 import { fmtEGP, fmtNum, relativeDay } from "../lib/format.js";
 import { snapshotSides, sideName, sideUnitLabel, unitLabel, findAcc, outEgp } from "../lib/valuation.js";
-import { parseEntry, localParseMany, withTimeout } from "../lib/parse.js";
+import { parseEntry, parseReceipts, localParseMany, withTimeout } from "../lib/parse.js";
+import { readAttachments, rejectionMessage, toAiInput } from "../lib/files.js";
 import { allDue, afterOccurrence, occurrenceToTxn, newRule, FREQUENCIES } from "../lib/recurring.js";
+import { buildMemory, instantMatch } from "../lib/memory.js";
+import { parseStatement, markDuplicates, trimCsv } from "../lib/statement.js";
+import { fetchInbox, fetchInboxFile, ackInbox, drainInbox } from "../lib/inbox.js";
 import { TAXONOMY, MAIN_CATS, uid, touch, tombstone, live } from "../../shared/model.js";
 import { ACCENT, catIcon, MONO_FONT, TEAL, ROSE, AMBER } from "../theme.js";
 
@@ -116,13 +120,16 @@ function TxnForm({ accs, onAdd, initial = {}, submitLabel = "Log it" }) {
 }
 
 /* ---------- quick add ---------- */
-function QuickAdd({ accs, onParsed, focusSignal }) {
+function QuickAdd({ accs, onParsed, focusSignal, memory, shared, onSharedConsumed, onLogNow }) {
   const callAI = useAI();
   const [text, setText] = useState("");
-  const [image, setImage] = useState(null);
+  const [atts, setAtts] = useState([]);       // readAttachment() results, in the order picked
+  const [oneDoc, setOneDoc] = useState(false); // several pages of one receipt, rather than several receipts
   const [payFrom, setPayFrom] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
   const [err, setErr] = useState(null);
+  const [note, setNote] = useState(null);
   const [listening, setListening] = useState(false);
   const recRef = useRef(null);
   const taRef = useRef(null);
@@ -131,19 +138,26 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
     if (focusSignal && taRef.current) taRef.current.focus();
   }, [focusSignal]);
 
+  /* What the ledger already knows about this note. Computed as you type, with
+     no network involved — the whole point is that a repeat costs one tap. */
+  const instant = useMemo(
+    () => (atts.length ? null : instantMatch(memory, text, accs)),
+    [memory, text, accs, atts.length]
+  );
+
   // stop a live recogniser if the user navigates away mid-dictation
   useEffect(() => () => { try { recRef.current && recRef.current.stop(); } catch {} }, []);
 
-  function onFile(e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    if (!/^image\/(jpeg|png|gif|webp)$/.test(file.type)) { setErr("Use a JPG, PNG, GIF or WEBP image."); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const mm = /^data:(.+);base64,(.*)$/.exec(String(reader.result));
-      if (mm) setImage({ media: mm[1], data: mm[2], name: file.name });
-    };
-    reader.readAsDataURL(file);
+  async function onFile(e) {
+    const picked = [...(e.target.files || [])];
+    e.target.value = ""; // let the same file be picked again after a removal
+    if (!picked.length) return;
+    setBusy(true);
+    const bytes = atts.reduce((n, a) => n + (a.size || 0), 0);
+    const { attachments, rejected } = await readAttachments(picked, bytes);
+    setBusy(false);
+    setErr(rejectionMessage(rejected));
+    if (attachments.length) setAtts((l) => [...l, ...attachments]);
   }
 
   function toggleMic() {
@@ -166,18 +180,47 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
     catch { setListening(false); setErr("Couldn't start the mic here. Use your keyboard's mic instead."); }
   }
 
-  async function parse() {
-    if (!text.trim() && !image) { setErr("Type a note, dictate one, or attach a receipt first."); return; }
+  /* Takes its input explicitly rather than off state, so a share arriving from
+     another app can start a parse in the same tick it fills the box.
+
+     One attachment or several changes what a "correct" answer even is. Pages
+     of one invoice have to be read together or half the order goes missing;
+     three separate receipts have to be read apart or their totals pool into
+     one unrecognisable number. Nothing in the files says which this is, so the
+     app does not guess — it assumes the common case (separate receipts) and
+     puts the other one a tap away. */
+  async function runParse(t, list, combined) {
+    if (!t && !list.length) { setErr("Type a note, dictate one, or attach a receipt first."); return; }
     setBusy(true);
     setErr(null);
+    const timedAI = (spec) => withTimeout(callAI(spec), list.length ? 45000 : 25000);
+
     try {
-      const fields = await withTimeout(parseEntry(accs, { text: text.trim(), image, payFrom: payFrom || undefined }, callAI), 25000);
+      let fields;
+      let failed = [];
+      if (!list.length) {
+        fields = await withTimeout(parseEntry(accs, { text: t, payFrom: payFrom || undefined, memory }, callAI), 25000);
+      } else if (combined || list.length === 1) {
+        const input = toAiInput(list);
+        fields = await parseEntry(accs, { text: t, ...input, payFrom: payFrom || undefined, memory }, timedAI);
+      } else {
+        const items = list.map((a) => ({ ...toAiInput([a]), name: a.name }));
+        const got = await parseReceipts(accs, { items, text: t, payFrom: payFrom || undefined, memory }, timedAI, setProgress);
+        fields = got.rows;
+        failed = got.failed;
+      }
       onParsed(fields);
       setText("");
-      setImage(null);
+      setAtts([]);
+      setOneDoc(false);
+      setNote(
+        failed.length
+          ? `${failed.length} of ${list.length} couldn't be read: ${failed.map((f) => f.name).join(", ")}`
+          : null
+      );
     } catch {
-      if (!image && text.trim()) {
-        onParsed(localParseMany(accs, text.trim()));
+      if (!list.length && t) {
+        onParsed(localParseMany(accs, t, memory));
         setText("");
         setErr("AI wasn't reachable, so I did a quick offline read — check each one before saving.");
       } else {
@@ -185,13 +228,36 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
       }
     }
     setBusy(false);
+    setProgress(null);
   }
+
+  const parse = () => runParse(text.trim(), atts, oneDoc);
+
+  /* Arrived from the system share sheet: fill the box and start reading it
+     without waiting for a tap. Whoever shared a receipt has already expressed
+     the intent — asking them to press Parse as well is the tap this whole
+     path exists to remove. */
+  useEffect(() => {
+    if (!shared) return;
+    const files = shared.files || [];
+    setText(shared.text || "");
+    setAtts(files);
+    setNote(
+      files.length > 1
+        ? `Shared — reading ${files.length} files, one at a time.`
+        : "Shared from another app — reading it now."
+    );
+    runParse((shared.text || "").trim(), files, false);
+    onSharedConsumed && onSharedConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shared && shared.k]);
 
   return (
     <Card>
       <CardTitle>Quick add</CardTitle>
       <p className="text-[12px] mz-tx2 mt-1 mb-2">
-        Write it however you'd say it — and list several at once: "lunch 250 cash, coffee 80, salary 95k into Clouds". Tap Parse and you review them before saving.
+        Write it however you'd say it — and list several at once: "lunch 250 cash, coffee 80, salary 95k into Clouds". Or attach the
+        evening's receipts, photos and PDFs together, and each one is read on its own. Tap Parse and you review everything before saving.
       </p>
       <textarea
         ref={taRef}
@@ -201,12 +267,28 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
         placeholder="e.g. spent 250 on coffee, cash"
         className="w-full mz-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
       />
-      {image && (
+      {atts.length > 0 && (
         <>
-          <div className="flex items-center justify-between mt-2 text-[11px] font-mono border mz-note-mut rounded-lg px-2 py-1.5">
-            <span className="truncate">📎 {image.name}</span>
-            <button onClick={() => setImage(null)} className="mz-tx3 mz-hovrose ml-2">remove</button>
+          <div className="mt-2 space-y-1">
+            {atts.map((a, i) => (
+              <div key={i} className="flex items-center justify-between text-[11px] font-mono border mz-note-mut rounded-lg px-2 py-1.5">
+                <span className="truncate">
+                  {a.kind === "image" ? "🖼" : a.kind === "doc" ? "📄" : "🧾"} {a.name}
+                  {a.note ? <span className="mz-tx3"> · {a.note}</span> : null}
+                </span>
+                <button onClick={() => setAtts((l) => l.filter((_, j) => j !== i))} className="mz-tx3 mz-hovrose ml-2">remove</button>
+              </div>
+            ))}
           </div>
+          {atts.length > 1 && (
+            <label className="flex items-start gap-2 mt-2 text-[11px] mz-tx2 cursor-pointer">
+              <input type="checkbox" checked={oneDoc} onChange={(e) => setOneDoc(e.target.checked)} className="mt-0.5" />
+              <span>
+                These are pages of <strong>one</strong> receipt or invoice.
+                <span className="mz-tx3"> Leave it off and each file is read as its own receipt — which is what stops three totals becoming one.</span>
+              </span>
+            </label>
+          )}
           <div className="mt-2">
             <span className="text-[11px] font-mono uppercase tracking-wide mz-tx3">Paid from</span>
             <select value={payFrom} onChange={(e) => setPayFrom(e.target.value)} className="w-full mt-1 mz-input rounded-lg px-3 py-2 text-sm">
@@ -214,9 +296,46 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
               {accs.filter((a) => !a.isLiability && a.unit !== "GOLD").map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
             <p className="text-[11px] mz-tx3 mt-1">A grocery receipt splits into separate transactions by category (food vs household, etc.) — all from this account, for you to review.</p>
+            <p className="text-[11px] mz-tx3 mt-1">
+              {atts.length > 1 && !oneDoc
+                ? `${atts.length} receipts, read one at a time so each keeps its own store, date and total.`
+                : null}
+            </p>
           </div>
         </>
       )}
+      {instant && (
+        <div className="mt-2 rounded-lg border mz-note-teal p-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-mono uppercase tracking-widest mz-txteal inline-flex items-center gap-1.5">
+                <Zap size={11} strokeWidth={2.4} /> you usually log this
+              </div>
+              <div className="text-sm font-medium truncate mt-0.5">
+                {instant.hit.category || instant.txn.type}
+                {instant.hit.subcategory ? <span className="mz-tx3 font-normal"> · {instant.hit.subcategory}</span> : null}
+                <span className="mz-tx3 font-normal">
+                  {" · "}
+                  {instant.txn.type === "income"
+                    ? `+${fmtNum(instant.txn.toAmount, 0)} → ${findAcc(accs, instant.txn.toId)?.name}`
+                    : `−${fmtNum(instant.txn.fromAmount, 0)} from ${findAcc(accs, instant.txn.fromId)?.name}`}
+                </span>
+              </div>
+              <div className="text-[11px] font-mono mz-tx3 mt-0.5">
+                {instant.usedTypical ? "your usual amount · " : ""}
+                {instant.hit.count}× before
+              </div>
+            </div>
+            <button
+              onClick={() => { onLogNow(instant.txn); setText(""); setErr(null); setNote(null); }}
+              className="shrink-0 text-[11px] font-mono px-3 py-2 rounded-lg mz-btn-primary"
+            >
+              Log now
+            </button>
+          </div>
+        </div>
+      )}
+      {note && <div className="mt-2 text-[11px] font-mono mz-txblue border mz-note-blue rounded-lg px-2 py-1.5 inline-flex items-center gap-1.5"><Share2 size={11} strokeWidth={2} /> {note}</div>}
       {err && <div className="mt-2 text-[11px] mz-txrose border mz-note-rose rounded-lg p-2">{err}</div>}
       <div className="flex items-center gap-2 mt-2">
         <button
@@ -227,11 +346,17 @@ function QuickAdd({ accs, onParsed, focusSignal }) {
           <Mic size={13} strokeWidth={2} /> {listening ? "listening…" : "dictate"}
         </button>
         <label className="relative text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost cursor-pointer overflow-hidden inline-flex items-center gap-1.5">
-          <Camera size={13} strokeWidth={2} /> receipt
-          <input type="file" accept="image/*" onChange={onFile} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+          <Camera size={13} strokeWidth={2} /> {atts.length ? "add more" : "receipts"}
+          <input
+            type="file"
+            accept="image/*,application/pdf,.pdf"
+            multiple
+            onChange={onFile}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
         </label>
         <button onClick={parse} disabled={busy} className="flex-1 text-sm font-medium px-3 py-2 rounded-lg mz-btn-primary">
-          {busy ? "reading…" : "Parse"}
+          {busy ? (progress && progress.of > 1 ? `reading ${Math.min(progress.done + 1, progress.of)} of ${progress.of}…` : "reading…") : "Parse"}
         </button>
       </div>
     </Card>
@@ -352,6 +477,235 @@ function RuleForm({ rule, accs, onSave, onCancel }) {
   );
 }
 
+/* ---------- statement sweep ----------
+   The catch-up path: for the weeks that were never logged, the bank's own
+   record is the only honest one left. Screenshots and CSV exports both land
+   here as "pages"; each is read on its own so one unreadable screenshot
+   costs its own rows and not the whole sweep. */
+function StatementSweep({ accs, txns, memory, onSwept }) {
+  const callAI = useAI();
+  const [open, setOpen] = useState(false);
+  const [pages, setPages] = useState([]); // { kind, text?, image?, name }
+  const [text, setText] = useState("");
+  const [acctId, setAcctId] = useState(accs[0]?.id || "");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const reset = () => { setPages([]); setText(""); setErr(null); setProgress(null); };
+
+  /* A PDF gets its text pulled out here when it has one — which an emailed
+     e-statement always does. Twelve pages then cost one small text call
+     instead of twelve vision calls, and a page of rows the model never has to
+     squint at is a page it cannot misread. A scan has no text to find, so the
+     file itself goes up. */
+  async function onFiles(e) {
+    const picked = [...(e.target.files || [])];
+    e.target.value = ""; // let the same file be picked again after a removal
+    setBusy(true);
+    const bytes = pages.reduce((n, p) => n + (p.size || 0), 0);
+    const { attachments, rejected } = await readAttachments(picked, bytes);
+    setBusy(false);
+    setErr(
+      rejectionMessage(rejected) ||
+        (attachments.length ? null : "Use screenshots, a PDF statement, or a CSV/TXT export.")
+    );
+    setPages((p) => [
+      ...p,
+      ...attachments.map((a) => (a.kind === "text" ? { ...a, text: trimCsv(a.text) } : a)),
+    ]);
+  }
+
+  const allPages = useMemo(() => {
+    const list = pages.map((p) => (p.kind === "text" ? { text: p.text } : { files: [p.file] }));
+    if (text.trim()) list.unshift({ text: text.trim() });
+    return list;
+  }, [pages, text]);
+
+  async function run() {
+    if (!allPages.length) { setErr("Paste the statement text, or add a screenshot or CSV export."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const { rows, failed } = await parseStatement(
+        accs,
+        { pages: allPages, accountId: acctId || undefined, memory },
+        callAI,
+        setProgress
+      );
+      const marked = markDuplicates(rows, txns);
+      onSwept(marked, failed);
+      setOpen(false);
+      reset();
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      setErr(
+        msg === "all-pages-failed"
+          ? "Couldn't read any of those. Statement sweeps need an AI provider — add a Gemini key in Settings — and screenshots need to show the transaction list, not a summary screen."
+          : "That didn't parse. Try one page at a time, or paste the rows as text."
+      );
+    }
+    setBusy(false);
+    setProgress(null);
+  }
+
+  return (
+    <>
+      <Card>
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-2">
+            <FileText size={14} strokeWidth={2} className="mz-tx2" />
+            <CardTitle>Statement sweep</CardTitle>
+          </span>
+          <button onClick={() => setOpen(true)} className="text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost">
+            catch up
+          </button>
+        </div>
+        <p className="text-[12px] mz-tx2 mt-1">
+          Skipped a few weeks? Drop in the PDF your bank emailed, screenshots of its app, or a pasted list, and Mizan reads
+          every line — flagging the ones you already logged, so nothing gets counted twice.
+        </p>
+      </Card>
+
+      {open && (
+        <Modal title="Sweep a statement" onClose={() => { setOpen(false); reset(); }} wide>
+          <div className="space-y-3">
+            <Field label="Statement belongs to">
+              <select className={inputCls} value={acctId} onChange={(e) => setAcctId(e.target.value)}>
+                <option value="">let the model work it out</option>
+                {accs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+
+            <Field label="Paste the rows" hint="Copied from a banking app, an email statement, or a CSV">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={5}
+                placeholder={"12/08  UBER TRIP           -70.00\n13/08  SEOUDI MARKET      -845.50"}
+                className="w-full mz-input rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:border-blue-500"
+              />
+            </Field>
+
+            <div>
+              <label className="relative inline-flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost cursor-pointer overflow-hidden">
+                <Camera size={13} strokeWidth={2} /> add PDFs, screenshots or CSV
+                <input type="file" accept="image/*,application/pdf,.pdf,.csv,.txt,.tsv,text/csv,text/plain" multiple onChange={onFiles} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+              </label>
+              {pages.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {pages.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between text-[11px] font-mono border mz-note-mut rounded-lg px-2 py-1.5">
+                      <span className="truncate">
+                        {p.kind === "image" ? "🖼" : "📄"} {p.name}
+                        {p.note ? <span className="mz-tx3"> · {p.note}</span> : null}
+                      </span>
+                      <button onClick={() => setPages((l) => l.filter((_, j) => j !== i))} className="mz-tx3 mz-hovrose ml-2">remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {err && <div className="text-[11px] mz-txrose border mz-note-rose rounded-lg p-2">{err}</div>}
+
+            <button onClick={run} disabled={busy} className="w-full mz-btn-primary text-sm font-medium py-2.5 rounded-lg">
+              {busy
+                ? progress ? `reading page ${progress.page} of ${progress.of}…` : "reading…"
+                : `Read ${allPages.length || "the"} ${allPages.length === 1 ? "page" : "pages"}`}
+            </button>
+            <p className="text-[11px] mz-tx3">
+              Nothing is written yet — every line comes back as a proposal, and anything that looks like something you
+              already logged arrives unticked.
+            </p>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ---------- Telegram inbox ----------
+   Things captured while the app was closed. They are read here, with the
+   user's own key, and only acknowledged once there is a proposal on screen to
+   show for them — see lib/inbox.js. */
+function InboxCard({ accs, memory, enabled, onDrained }) {
+  const callAI = useAI();
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => {
+    if (!enabled) { setItems([]); return; }
+    fetchInbox().then((r) => setItems(r.items || [])).catch(() => {});
+  }, [enabled]);
+
+  useEffect(() => { load(); }, [load]);
+
+  /* Coming back to the app is exactly when something sent from the till is
+     waiting, so re-check on focus rather than only on mount. */
+  useEffect(() => {
+    if (!enabled) return;
+    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [enabled, load]);
+
+  async function read() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const { proposals, doneIds, failed } = await drainInbox(
+        items,
+        {
+          parseText: (t) => withTimeout(parseEntry(accs, { text: t, memory }, callAI), 25000),
+          parseFile: (att, t) => withTimeout(parseEntry(accs, { text: t, ...toAiInput([att]), memory }, callAI), 40000),
+          loadFile: (id) => fetchInboxFile(id),
+        },
+        setProgress
+      );
+      if (doneIds.length) await ackInbox(doneIds);
+      setItems((l) => l.filter((x) => !doneIds.includes(x.id)));
+      if (proposals.length) onDrained(proposals, failed);
+      else setErr("Couldn't read any of those. They're still waiting — an AI key in Settings is what this needs.");
+    } catch {
+      setErr("Couldn't reach the inbox just now.");
+    }
+    setBusy(false);
+    setProgress(null);
+  }
+
+  if (!enabled || (!items.length && !err)) return null;
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-2">
+          <Send size={14} strokeWidth={2} className="mz-tx2" />
+          <CardTitle>{items.length} waiting from Telegram</CardTitle>
+        </span>
+        {items.length > 0 && (
+          <button onClick={read} disabled={busy} className="text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-primary">
+            {busy ? (progress ? `reading ${progress.done}/${progress.of}…` : "reading…") : "read them"}
+          </button>
+        )}
+      </div>
+      {items.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {items.slice(0, 4).map((it) => (
+            <div key={it.id} className="text-[11px] font-mono mz-tx3 truncate">
+              {it.hasFile ? "🧾 " : "› "}{it.text || "receipt photo"}
+            </div>
+          ))}
+          {items.length > 4 && <div className="text-[11px] font-mono mz-tx3">…and {items.length - 4} more</div>}
+        </div>
+      )}
+      {err && <div className="mt-2 text-[11px] mz-txrose border mz-note-rose rounded-lg p-2">{err}</div>}
+    </Card>
+  );
+}
+
 /* ---------- ledger row ---------- */
 function TxnRow({ t, accs, onEdit, onDelete }) {
   const color = t.type === "income" ? TEAL : t.type === "expense" ? ROSE : "#64748B";
@@ -397,12 +751,13 @@ function TxnRow({ t, accs, onEdit, onDelete }) {
 }
 
 /* ---------- tab ---------- */
-export default function Activity({ state, setState, prices, focusSignal, onNavigate }) {
+export default function Activity({ state, setState, prices, focusSignal, onNavigate, shared, onSharedConsumed, telegramLinked }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [parsed, setParsed] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const [pending, setPending] = useState([]);
+  const [pendingNote, setPendingNote] = useState(null);
   const [warn, setWarn] = useState([]);
   const [editTxn, setEditTxn] = useState(null);
   const [query, setQuery] = useState("");
@@ -413,6 +768,11 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   const txns = useMemo(() => live(state, "transactions"), [state]);
   const rules = useMemo(() => live(state, "recurring"), [state]);
   const today = new Date().toISOString().slice(0, 10);
+
+  /* What the ledger has taught the app so far. Rebuilt when the ledger changes
+     rather than stored: it is derived data, and a stale index that survives a
+     re-categorisation would keep proposing the answer you just corrected. */
+  const memory = useMemo(() => buildMemory(txns), [txns]);
 
   /* ---- balance arithmetic ---- */
   const applyDelta = (accounts, id, delta) =>
@@ -497,14 +857,16 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
 
   function addMany(list) {
     const norm = list.map(normalize);
+    if (!norm.length) return;
     setState((s) => {
       let accounts = s.accounts;
       norm.forEach((t) => (accounts = applyTxn(accounts, t)));
       return { ...s, accounts, transactions: [...norm.slice().reverse(), ...s.transactions] };
     });
     setPending([]);
+    setPendingNote(null);
     checkBudgets(norm);
-    toast("Logged " + norm.length + " transactions");
+    toast("Logged " + norm.length + " transaction" + (norm.length === 1 ? "" : "s"));
   }
 
   function commitEdit(raw) {
@@ -569,18 +931,59 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
       setFormKey((k) => k + 1);
       setOpen(true);
       setPending([]);
+      setPendingNote(null);
     } else {
-      setPending(list.map((f) => ({ ...f, _k: uid() })));
+      setPending(list.map((f) => ({ ...f, _k: uid(), _on: true, dup: null })));
+      setPendingNote(null);
       setOpen(false);
       setParsed(null);
     }
   }
+
+  /* A swept statement arrives the same way a parsed note does, with one
+     difference: rows that look like something already in the ledger come in
+     unticked. Unticked, not missing — a bank posts on a different day than you
+     spent and amounts repeat honestly, so this is a suspicion to show, never a
+     decision to make on someone's behalf. */
+  function onSwept(rows, failed) {
+    if (!rows.length) {
+      setPendingNote(null);
+      toast("Nothing readable in that statement");
+      return;
+    }
+    setPending(rows.map((r) => ({ ...r, _k: uid(), _on: !r.dup })));
+    setOpen(false);
+    setParsed(null);
+    const dups = rows.filter((r) => r.dup).length;
+    const parts = [`${rows.length} line${rows.length === 1 ? "" : "s"} read`];
+    if (dups) parts.push(`${dups} already in your ledger, left unticked`);
+    if (failed && failed.length) parts.push(`${failed.length} page${failed.length === 1 ? "" : "s"} couldn't be read`);
+    setPendingNote(parts.join(" · "));
+  }
+
+  /* Captures read out of the Telegram inbox land in the same review list, and
+     get the same duplicate check — you may well have logged the coffee by hand
+     after texting it. */
+  function onDrained(proposals, failed) {
+    const marked = markDuplicates(proposals, txns);
+    setPending(marked.map((r) => ({ ...r, _k: uid(), _on: !r.dup })));
+    setOpen(false);
+    setParsed(null);
+    const dups = marked.filter((r) => r.dup).length;
+    const parts = [`${marked.length} from Telegram`];
+    if (dups) parts.push(`${dups} look${dups === 1 ? "s" : ""} already logged, left unticked`);
+    if (failed && failed.length) parts.push(`${failed.length} couldn't be read and are still waiting`);
+    setPendingNote(parts.join(" · "));
+  }
+
   function editPending(p) {
     setParsed(p);
     setFormKey((k) => k + 1);
     setOpen(true);
     setPending((l) => l.filter((x) => x._k !== p._k));
   }
+  const togglePending = (k) => setPending((l) => l.map((x) => (x._k === k ? { ...x, _on: !x._on } : x)));
+  const selected = pending.filter((p) => p._on);
 
   /* ---- search + windowing ----
      The ledger used to render every transaction on every state change. With a
@@ -645,14 +1048,27 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
         </div>
       )}
 
-      <QuickAdd accs={accs} onParsed={onParsed} focusSignal={focusSignal} />
+      <QuickAdd
+        accs={accs}
+        onParsed={onParsed}
+        focusSignal={focusSignal}
+        memory={memory}
+        shared={shared}
+        onSharedConsumed={onSharedConsumed}
+        onLogNow={addTxn}
+      />
+
+      <InboxCard accs={accs} memory={memory} enabled={!!telegramLinked} onDrained={onDrained} />
 
       {pending.length > 0 && (
         <Card>
           <div className="flex items-center justify-between">
             <CardTitle>Review {pending.length} parsed</CardTitle>
-            <button onClick={() => setPending([])} className="text-[11px] font-mono mz-tx3 mz-hovrose">discard all</button>
+            <button onClick={() => { setPending([]); setPendingNote(null); }} className="text-[11px] font-mono mz-tx3 mz-hovrose">discard all</button>
           </div>
+          {pendingNote && (
+            <div className="mt-2 text-[11px] font-mono mz-txblue border mz-note-blue rounded-lg px-2 py-1.5">{pendingNote}</div>
+          )}
           <div className="divide-y mz-dv mt-1">
             {pending.map((p) => {
               const from = findAcc(accs, p.fromId);
@@ -663,17 +1079,33 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
                 : p.type === "transfer" ? `${fmtNum(p.fromAmount || 0, 2)}${unitLabel(from)} → ${p.toAmount != null ? fmtNum(p.toAmount, 2) + unitLabel(to) : "?"}`
                 : `−${fmtNum(p.fromAmount || 0, 2)}${unitLabel(from)}`;
               return (
-                <div key={p._k} className="flex items-center justify-between py-2 gap-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {p.category || (p.type === "transfer" ? "Transfer" : p.type)}
-                      {p.subcategory ? <span className="mz-tx3 font-normal"> · {p.subcategory}</span> : null}
-                      {needsAmt && <span className="ml-2 text-[10px] font-mono" style={{ color: AMBER }}>needs amount</span>}
-                    </div>
-                    <div className="text-[11px] font-mono mz-tx3 truncate">
-                      {p.date} · {p.type === "income" ? `→ ${to?.name}` : p.type === "expense" ? `${from?.name} →` : `${from?.name} → ${to?.name}`}
-                    </div>
-                  </div>
+                <div key={p._k} className={"flex items-center justify-between py-2 gap-2" + (p._on ? "" : " opacity-55")}>
+                  <label className="flex items-center gap-2.5 min-w-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!p._on}
+                      onChange={() => togglePending(p._k)}
+                      aria-label={p._on ? "Don't log this one" : "Log this one"}
+                      className="shrink-0"
+                    />
+                    <span className="min-w-0">
+                      <span className="text-sm font-medium truncate block">
+                        {p.category || (p.type === "transfer" ? "Transfer" : p.type)}
+                        {p.subcategory ? <span className="mz-tx3 font-normal"> · {p.subcategory}</span> : null}
+                        {needsAmt && <span className="ml-2 text-[10px] font-mono" style={{ color: AMBER }}>needs amount</span>}
+                      </span>
+                      <span className="text-[11px] font-mono mz-tx3 truncate block">
+                        {p.date} · {p.type === "income" ? `→ ${to?.name}` : p.type === "expense" ? `${from?.name} →` : `${from?.name} → ${to?.name}`}
+                        {p.note ? ` · ${p.note}` : ""}
+                      </span>
+                      {p.dup && (
+                        <span className="text-[10px] font-mono inline-flex items-center gap-1 mt-0.5" style={{ color: AMBER }}>
+                          <AlertTriangle size={10} strokeWidth={2.4} />
+                          already logged {p.dup.date}{p.dup.note ? ` · ${p.dup.note}` : ""}
+                        </span>
+                      )}
+                    </span>
+                  </label>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="font-mono tabular-nums text-sm">{amt}</span>
                     <button onClick={() => editPending(p)} aria-label="Edit parsed item" className="mz-iconbtn mz-tx2 mz-hovblue"><Pencil size={14} strokeWidth={2} /></button>
@@ -683,7 +1115,15 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
               );
             })}
           </div>
-          <button onClick={() => addMany(pending)} className="w-full mt-3 mz-btn-primary text-sm font-medium py-2 rounded-lg">Add all {pending.length}</button>
+          <button
+            onClick={() => addMany(selected)}
+            disabled={!selected.length}
+            className="w-full mt-3 mz-btn-primary text-sm font-medium py-2 rounded-lg disabled:opacity-50"
+          >
+            {selected.length === pending.length
+              ? `Add all ${pending.length}`
+              : `Add ${selected.length} of ${pending.length}`}
+          </button>
         </Card>
       )}
 
@@ -723,6 +1163,8 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
         onSave={saveRule}
         onDelete={deleteRule}
       />
+
+      <StatementSweep accs={accs} txns={txns} memory={memory} onSwept={onSwept} />
 
       <Card>
         <div className="flex items-center justify-between gap-2">

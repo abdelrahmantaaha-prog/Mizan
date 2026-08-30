@@ -1,7 +1,12 @@
 /* AI provider abstraction.
 
    aiComplete(spec, cfg) -> string of model output text
-     spec: { prompt, system?, image?: { media, data }, search?: boolean }
+     spec: { prompt, system?, image?, files?, search?: boolean }
+       image — one { media, data }, kept because most callers send one thing
+       files — several of the same, in order: receipt photos, statement pages,
+               or a PDF that had no text to extract (media application/pdf).
+               Both providers read PDFs natively, so a scan does not have to be
+               turned into images first.
      cfg:  { geminiKey?, geminiModel? }   // geminiModel "auto" = resolve best Flash
 
    Routing: if a Gemini API key is configured (Settings page), calls the Gemini
@@ -149,11 +154,24 @@ function isGroundingError(err) {
   return /grounding|google_search|search tool|tool is not supported|tools? (is|are) not (supported|enabled)/.test(msg);
 }
 
-async function geminiCall({ prompt, system, image, search }, cfg) {
+/* One or many, one shape. `image` is the single-attachment spelling every
+   caller started with; `files` is the same thing for a stack of receipts. */
+export function attachmentsOf(spec) {
+  const list = [];
+  if (spec.image) list.push(spec.image);
+  if (Array.isArray(spec.files)) list.push(...spec.files.filter(Boolean));
+  return list.filter((f) => f && f.data);
+}
+
+const isPdfPart = (f) => /pdf/i.test(f.media || "");
+
+async function geminiCall({ prompt, system, image, files, search }, cfg) {
   const { base, key } = route(cfg);
   if (!key) throw new Error("no-key");
   const parts = [];
-  if (image) parts.push({ inline_data: { mime_type: image.media, data: image.data } });
+  // attachments before the instruction: the prompt refers to them, and a model
+  // that has already seen the pages reads the instruction against them
+  for (const f of attachmentsOf({ image, files })) parts.push({ inline_data: { mime_type: f.media, data: f.data } });
   parts.push({ text: prompt });
   const makeBody = (useSearch) => {
     const body = {
@@ -203,12 +221,19 @@ async function geminiCall({ prompt, system, image, search }, cfg) {
   throw lastErr || new Error("gemini-unavailable");
 }
 
-async function anthropicCall({ prompt, system, image, search }) {
+async function anthropicCall({ prompt, system, image, files, search }) {
   const endpoint = (typeof window !== "undefined" && window.MIZAN_API) || "https://api.anthropic.com/v1/messages";
+  const attached = attachmentsOf({ image, files });
   let content;
-  if (image)
+  if (attached.length)
     content = [
-      { type: "image", source: { type: "base64", media_type: image.media, data: image.data } },
+      // a PDF is a document block here rather than an image one — that is what
+      // lets the model read a text statement as text instead of as pictures
+      ...attached.map((f) =>
+        isPdfPart(f)
+          ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } }
+          : { type: "image", source: { type: "base64", media_type: f.media, data: f.data } }
+      ),
       { type: "text", text: prompt },
     ];
   else content = prompt;

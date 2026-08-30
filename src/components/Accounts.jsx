@@ -6,6 +6,7 @@ import { Card, CardTitle, Field, Modal, NumberInput, Segmented, inputCls, useToa
 import { fmtEGP, fmtEGPShort, fmtNum, fmtPct } from "../lib/format.js";
 import { unitLabel } from "../lib/valuation.js";
 import { parseBalances, localParseBalances, withTimeout } from "../lib/parse.js";
+import { readAttachment, toAiInput } from "../lib/files.js";
 import { CLASS_ORDER, ILLIQUID_CLASS, uid, touch, tombstone, live } from "../../shared/model.js";
 import { CLASS_COLOR, CLASS_ICON, LIABILITY_COLOR, MONO_FONT, TEAL, ROSE } from "../theme.js";
 
@@ -137,14 +138,16 @@ function BalanceSync({ accs, onApply }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, scope]);
 
-  function fileToImage(file, cb) {
-    if (!file || !/^image\//.test(file.type)) { setMsg("That file isn't an image."); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const mm = /^data:(.+);base64,(.*)$/.exec(String(reader.result));
-      if (mm) cb({ media: mm[1], data: mm[2] });
-    };
-    reader.readAsDataURL(file);
+  /* A screenshot of the app, or the PDF the broker emails every month —
+     readAttachment decides whether the numbers can be read here or the file
+     has to go up. */
+  async function pickFile(file, cb) {
+    if (!file) return;
+    try {
+      cb(await readAttachment(file));
+    } catch {
+      setMsg("Use a screenshot, a PDF statement, or type the balances.");
+    }
   }
 
   function applyParsed(map) {
@@ -155,16 +158,17 @@ function BalanceSync({ accs, onApply }) {
     });
   }
 
-  async function runParse(image) {
+  async function runParse(attachment) {
     setBusy(true);
     setMsg(null);
     try {
-      const map = await withTimeout(parseBalances(targets, { text: text.trim(), image }, callAI), 30000);
+      const input = attachment ? toAiInput([attachment]) : {};
+      const map = await withTimeout(parseBalances(targets, { text: text.trim(), ...input }, callAI), 30000);
       if (!Object.keys(map).length) throw new Error("empty");
       applyParsed(map);
       setMsg("Read " + Object.keys(map).length + " balance(s) — check, then Apply.");
     } catch {
-      if (!image && text.trim()) {
+      if (!attachment && text.trim()) {
         const map = localParseBalances(targets, text.trim());
         if (Object.keys(map).length) {
           applyParsed(map);
@@ -173,7 +177,7 @@ function BalanceSync({ accs, onApply }) {
           setMsg("Couldn't match any balances. Type them like: clouds 338564, azg 45725, bwa 9762");
         }
       } else {
-        setMsg("Reading a screenshot needs an AI provider — add a Gemini key in Settings. Type the balances instead.");
+        setMsg("Reading a screenshot or PDF needs an AI provider — add a Gemini key in Settings. Type the balances instead.");
       }
     }
     setBusy(false);
@@ -199,7 +203,7 @@ function BalanceSync({ accs, onApply }) {
         </button>
       </div>
       {!open ? (
-        <p className="text-[12px] mz-tx2 mt-1">Refresh balances in bulk from a screenshot (e.g. your Thndr portfolio), or by typing them — instead of editing each account by hand.</p>
+        <p className="text-[12px] mz-tx2 mt-1">Refresh balances in bulk from a screenshot (e.g. your Thndr portfolio), the PDF statement your broker emails, or by typing them — instead of editing each account by hand.</p>
       ) : (
         <div className="mt-3 space-y-3">
           {hasThndr && <Segmented options={[["thndr", "Thndr"], ["all", "All accounts"]]} value={scope} onChange={setScope} />}
@@ -213,9 +217,15 @@ function BalanceSync({ accs, onApply }) {
             />
             <div className="flex items-center gap-2 mt-2">
               <button onClick={() => fileRef.current && fileRef.current.click()} className="text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost inline-flex items-center gap-1.5">
-                <Camera size={13} strokeWidth={2} /> screenshot
+                <Camera size={13} strokeWidth={2} /> screenshot or PDF
               </button>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => fileToImage(e.target.files && e.target.files[0], (img) => runParse(img))} />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*,application/pdf,.pdf"
+                className="hidden"
+                onChange={(e) => pickFile(e.target.files && e.target.files[0], (att) => runParse(att))}
+              />
               <button onClick={() => runParse(null)} disabled={busy} className="flex-1 text-sm font-medium px-3 py-2 rounded-lg mz-btn-primary">
                 {busy ? "reading…" : "Read into fields"}
               </button>

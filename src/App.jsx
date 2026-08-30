@@ -20,6 +20,7 @@ import { egpValue } from "./lib/valuation.js";
 import { zakatStatus, nextHawlStart } from "./lib/zakat.js";
 import { useSync } from "./lib/sync.js";
 import { initPWA, reloadWithUpdate, subscribeOnline } from "./lib/pwa.js";
+import { hasShareFlag, clearShareFlag, takeShare } from "./lib/share.js";
 import {
   emptyState, migrate, live, touchScalar, prune,
   CLASS_ORDER, LIQUID_CLASSES, ILLIQUID_CLASS, HISTORY_LIMIT, uid,
@@ -61,6 +62,7 @@ export default function Mizan() {
   const [webBusy, setWebBusy] = useState(false);
   const [webErr, setWebErr] = useState(null);
   const [qaFocus, setQaFocus] = useState(0); // FAB → focus the quick-add box
+  const [shared, setShared] = useState(null); // arrived via the system share sheet
   const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine !== false);
   const [updateReady, setUpdateReady] = useState(false);
   const didInit = useRef(false);
@@ -119,6 +121,24 @@ export default function Mizan() {
   /* ---------- connectivity + service worker ---------- */
   useEffect(() => subscribeOnline(setOnline), []);
   useEffect(() => { initPWA({ onNeedRefresh: () => setUpdateReady(true) }); }, []);
+
+  /* ---------- how the app was opened ----------
+     Two entry points land here with the tab already decided: the home-screen
+     shortcut (?tab=activity), and a share from another app, which the worker
+     redirects to ?shared=1 after parking the payload. Both are read once and
+     the flag is stripped, so a reload never replays a share. */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const want = params.get("tab");
+    if (want && ["overview", "accounts", "activity", "spending", "prices"].includes(want)) setTab(want);
+
+    if (!hasShareFlag()) return;
+    clearShareFlag();
+    setTab("activity");
+    takeShare()
+      .then((payload) => { if (payload) setShared({ ...payload, k: uid() }); })
+      .catch(() => {});
+  }, []);
 
   /* ---------- prices ---------- */
   const refreshPrices = useCallback(async () => {
@@ -308,7 +328,12 @@ export default function Mizan() {
                   )}
                   {tab === "accounts" && <Accounts valued={valued} state={state} setState={setState} />}
                   {tab === "activity" && (
-                    <Activity state={state} setState={setState} prices={prices} focusSignal={qaFocus} onNavigate={setTab} />
+                    <Activity
+                      state={state} setState={setState} prices={prices}
+                      focusSignal={qaFocus} onNavigate={setTab}
+                      shared={shared} onSharedConsumed={() => setShared(null)}
+                      telegramLinked={!!(sync.capability.telegram && sync.capability.telegram.linked)}
+                    />
                   )}
                   {tab === "spending" && (
                     <Suspense fallback={<TabFallback />}>

@@ -1,13 +1,14 @@
 /* Settings: account sync, AI key, appearance, backup, reset. */
 
 import React, { useRef, useState } from "react";
-import { ArrowLeft, KeyRound, Cloud, Download, Upload, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, KeyRound, Cloud, Download, Upload, FileSpreadsheet, Send } from "lucide-react";
 import { Card, CardTitle, Field, ConfirmButton, Segmented, inputCls, useToast } from "./ui.jsx";
 import { aiProviderName, testGeminiKey, DEFAULT_GEMINI_MODEL, GEMINI_MODELS } from "../lib/ai.js";
 import { exportBackupFile, exportTransactionsCsv, exportAccountsCsv, readFile } from "../lib/exportImport.js";
 import { egpValue } from "../lib/valuation.js";
 import { migrate, emptyState, live } from "../../shared/model.js";
 import { timeAgo } from "../lib/format.js";
+import { createLink, unlinkTelegram } from "../lib/inbox.js";
 import { ACCENT, DISPLAY_FONT, MONO_FONT, TEAL, AMBER } from "../theme.js";
 
 /* ---------- account sync ---------- */
@@ -109,6 +110,100 @@ function SyncCard({ sync }) {
   );
 }
 
+/* ---------- Telegram capture ----------
+   Linking is a code the user carries from here into a chat. It is short-lived
+   and single-use because it is the one thing that crosses between an
+   anonymous chat id and their account — see api/_inbox.js. */
+function TelegramCard({ sync }) {
+  const toast = useToast();
+  const [code, setCode] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const tg = (sync && sync.capability && sync.capability.telegram) || {};
+  if (!sync || !sync.capability.checked || !tg.available) return null;
+
+  const signedIn = !!sync.user;
+
+  async function link() {
+    setBusy(true);
+    setErr(null);
+    try {
+      setCode(await createLink());
+    } catch {
+      setErr("Couldn't get a code just now. Try again in a moment.");
+    }
+    setBusy(false);
+  }
+
+  async function unlink() {
+    try {
+      await unlinkTelegram();
+      setCode(null);
+      await sync.refresh();
+      toast("Telegram disconnected");
+    } catch {
+      setErr("Couldn't disconnect. Try again.");
+    }
+  }
+
+  const deepLink = code && code.bot ? `https://t.me/${code.bot}?start=${code.code}` : null;
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ background: ACCENT + "1F", color: ACCENT }}>
+            <Send size={15} strokeWidth={2} />
+          </span>
+          <CardTitle>Telegram capture</CardTitle>
+        </span>
+        {tg.linked && <span className="text-[10px] uppercase tracking-widest font-mono" style={{ color: TEAL }}>connected</span>}
+      </div>
+
+      <p className="text-[12px] mz-tx2 mt-2 leading-relaxed">
+        Text the bot what you spent — "80 uber", or a photo of a receipt — without opening anything. It's held until you
+        open Mizan, which reads it with your own key and shows it for confirmation. Nothing reaches your balances on its own.
+      </p>
+
+      {!signedIn ? (
+        <p className="text-[11px] mz-tx3 mt-2">Sign in above first — the bot needs an account to deliver to.</p>
+      ) : tg.linked ? (
+        <div className="mt-3">
+          <button onClick={unlink} className="text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost">disconnect</button>
+          <p className="text-[11px] mz-tx3 mt-1">Or send /stop to the bot. Anything already waiting stays until you read it.</p>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <button onClick={link} disabled={busy} className="mz-btn-primary text-sm font-medium px-4 py-2 rounded-lg">
+            {busy ? "getting a code…" : "Connect Telegram"}
+          </button>
+          {code && (
+            <div className="mt-3 rounded-xl border mz-note-blue p-3">
+              <div className="text-[11px] font-mono uppercase tracking-widest mz-txblue">your code</div>
+              <div className="font-mono text-lg tracking-[0.2em] mt-1">{code.code}</div>
+              <p className="text-[11px] mz-tx2 mt-2">
+                {deepLink ? "Open the bot and it links itself, or send " : "Send "}
+                <span className="font-mono">/start {code.code}</span>
+                {deepLink ? " by hand." : " to the bot."} Expires in {code.expiresInMinutes} minutes.
+              </p>
+              {deepLink && (
+                <a href={deepLink} target="_blank" rel="noreferrer" className="inline-block mt-2 text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-primary">
+                  open @{code.bot}
+                </a>
+              )}
+              <button onClick={() => sync.refresh()} className="ml-2 text-xs font-mono px-3 py-1.5 rounded-lg mz-btn-ghost">
+                I've sent it
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {err && <div className="mt-2 text-[11px] mz-txrose border mz-note-rose rounded-lg p-2">{err}</div>}
+    </Card>
+  );
+}
+
 export default function SettingsPage({
   settings, setSettings, state, setState, prices, setPrices, theme, setTheme, onBack, sync,
 }) {
@@ -196,6 +291,7 @@ export default function SettingsPage({
 
       <div className="mz-tabview space-y-3">
         <SyncCard sync={sync} />
+        <TelegramCard sync={sync} />
 
         <Card>
           <div className="flex items-center justify-between">
