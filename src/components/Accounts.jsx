@@ -267,7 +267,8 @@ function DebtLedger({ debts, onAdd, onSettle }) {
 
   function add() {
     const amt = Number(amount) || 0;
-    if (!amt) return;
+    // a name with nothing owed yet is someone to transfer money with later
+    if (!amt && !name.trim()) return;
     onAdd({
       id: uid(),
       dir,
@@ -303,14 +304,20 @@ function DebtLedger({ debts, onAdd, onSettle }) {
       )}
 
       {debts.length > 0 && (
+        <div className="text-[11px] mz-tx3 mt-2 leading-snug">
+          Sending or receiving money? On the Log tab choose <span className="mz-tx2">Transfer</span> and pick the person as From or To — your account and what's owed both update.
+        </div>
+      )}
+
+      {debts.length > 0 && (
         <div className="divide-y mz-dv mt-3">
           {debts.map((d) => (
             <div key={d.id} className="flex items-center justify-between py-2 gap-2">
               <div className="min-w-0">
                 <div className="text-sm font-medium truncate">
                   {d.name}
-                  <span className="text-[10px] font-mono uppercase ml-2" style={{ color: d.dir === "owed" ? TEAL : ROSE }}>
-                    {d.dir === "owed" ? "owed to me" : "I owe"}
+                  <span className="text-[10px] font-mono uppercase ml-2" style={{ color: !Number(d.amount) ? undefined : d.dir === "owed" ? TEAL : ROSE }}>
+                    {!Number(d.amount) ? "all square" : d.dir === "owed" ? "owed to me" : "I owe"}
                   </span>
                 </div>
                 <div className="text-[11px] font-mono mz-tx3 truncate">{d.date}{d.note ? " · " + d.note : ""}</div>
@@ -368,7 +375,7 @@ export default function Accounts({ valued, state, setState }) {
 
   function addDebt(d) {
     setState((s) => ({ ...s, debts: [touch(d), ...(s.debts || [])] }));
-    toast("Debt logged · " + d.name + " " + fmtEGPShort(d.amount));
+    toast(d.amount ? "Debt logged · " + d.name + " " + fmtEGPShort(d.amount) : "Added · " + d.name);
   }
 
   function settleDebt(d) {

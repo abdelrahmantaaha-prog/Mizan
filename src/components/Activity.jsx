@@ -14,6 +14,7 @@ import { allDue, afterOccurrence, occurrenceToTxn, newRule, FREQUENCIES } from "
 import { buildMemory, instantMatch } from "../lib/memory.js";
 import { parseStatement, markDuplicates, trimCsv } from "../lib/statement.js";
 import { fetchInbox, fetchInboxFile, ackInbox, drainInbox } from "../lib/inbox.js";
+import { debtSide, debtDeltas, shiftDebt, isDebtSide } from "../lib/debts.js";
 import { TAXONOMY, MAIN_CATS, uid, touch, tombstone, live } from "../../shared/model.js";
 import { ACCENT, catIcon, MONO_FONT, TEAL, ROSE, AMBER } from "../theme.js";
 
@@ -37,11 +38,14 @@ function CategoryPicker({ category, subcategory, setCategory, setSub }) {
 }
 
 /* ---------- manual / review form ---------- */
-function TxnForm({ accs, onAdd, initial = {}, submitLabel = "Log it" }) {
+/* `people` are debt counterparties shaped like accounts (see lib/debts.js).
+   They only take part in a transfer: paying someone or being paid by them
+   moves money and changes what is owed, and is never spending or income. */
+function TxnForm({ accs, people = [], onAdd, initial = {}, submitLabel = "Log it" }) {
   const today = new Date().toISOString().slice(0, 10);
   const [type, setType] = useState(initial.type || "expense");
-  const [fromId, setFromId] = useState(initial.fromId || accs[0]?.id);
-  const [toId, setToId] = useState(initial.toId || accs[1]?.id || accs[0]?.id);
+  const [pickedFrom, setFromId] = useState(initial.fromId || accs[0]?.id);
+  const [pickedTo, setToId] = useState(initial.toId || accs[1]?.id || accs[0]?.id);
   const [fromAmount, setFromAmount] = useState(initial.fromAmount != null && initial.fromAmount !== 0 ? initial.fromAmount : "");
   const [toAmount, setToAmount] = useState(initial.toAmount != null ? initial.toAmount : "");
   const [category, setCategory] = useState(initial.category || "");
@@ -50,9 +54,23 @@ function TxnForm({ accs, onAdd, initial = {}, submitLabel = "Log it" }) {
   const [date, setDate] = useState(initial.date || today);
   const [err, setErr] = useState(null);
 
-  const fromAcc = findAcc(accs, fromId);
-  const toAcc = findAcc(accs, toId);
+  // a person picked under Transfer falls back to an account if the type changes
+  const allowPeople = type === "transfer" && people.length > 0;
+  const choices = allowPeople ? [...accs, ...people] : accs;
+  const fromId = findAcc(choices, pickedFrom) ? pickedFrom : accs[0]?.id;
+  const toId = findAcc(choices, pickedTo) ? pickedTo : accs[1]?.id || accs[0]?.id;
+  const fromAcc = findAcc(choices, fromId);
+  const toAcc = findAcc(choices, toId);
   const sameUnit = fromAcc && toAcc && fromAcc.unit === toAcc.unit;
+
+  const sideOptions = allowPeople ? (
+    <>
+      <optgroup label="My accounts">{accs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</optgroup>
+      <optgroup label="People (debts)">{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+    </>
+  ) : (
+    accs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)
+  );
 
   function submit() {
     const fa = Number(fromAmount) || 0;
@@ -60,6 +78,7 @@ function TxnForm({ accs, onAdd, initial = {}, submitLabel = "Log it" }) {
     if (type === "income" && !ta) { setErr("Enter the amount received."); return; }
     if (type !== "income" && !fa) { setErr("Enter the amount."); return; }
     if (type === "transfer" && fromId === toId) { setErr("A transfer needs two different accounts."); return; }
+    if (isDebtSide(fromId) && isDebtSide(toId)) { setErr("One side needs to be one of your own accounts."); return; }
     onAdd({
       id: initial.id || uid(),
       date,
@@ -86,16 +105,23 @@ function TxnForm({ accs, onAdd, initial = {}, submitLabel = "Log it" }) {
         {type !== "income" && (
           <Field label={type === "transfer" ? "From" : "Account"}>
             <select className={inputCls} value={fromId} onChange={(e) => setFromId(e.target.value)}>
-              {accs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {sideOptions}
             </select>
           </Field>
         )}
         {type !== "expense" && (
           <Field label={type === "transfer" ? "To" : "Into account"}>
             <select className={inputCls} value={toId} onChange={(e) => setToId(e.target.value)}>
-              {accs.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {sideOptions}
             </select>
           </Field>
+        )}
+        {(fromAcc?.debt || toAcc?.debt) && (
+          <div className="text-[11px] mz-tx3 leading-snug">
+            {toAcc?.debt
+              ? `Money to ${toAcc.name}: what they owe you goes up, or what you owe them goes down.`
+              : `Money from ${fromAcc.name}: what they owe you goes down, or what you owe them goes up.`}
+          </div>
         )}
         {type !== "income" && (
           <Field label={`Amount out (${unitLabel(fromAcc)})`}>
@@ -765,6 +791,9 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   const [limit, setLimit] = useState(PAGE);
 
   const accs = useMemo(() => live(state, "accounts"), [state]);
+  const people = useMemo(() => live(state, "debts").map(debtSide), [state]);
+  /* everything a transaction side can name: accounts, then debt counterparties */
+  const sides = useMemo(() => [...accs, ...people], [accs, people]);
   const txns = useMemo(() => live(state, "transactions"), [state]);
   const rules = useMemo(() => live(state, "recurring"), [state]);
   const today = new Date().toISOString().slice(0, 10);
@@ -778,22 +807,28 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   const applyDelta = (accounts, id, delta) =>
     accounts.map((a) => (a.id === id ? touch({ ...a, balance: (Number(a.balance) || 0) + delta }) : a));
 
-  const applyTxn = (accounts, t) => {
-    if (t.type === "income") return applyDelta(accounts, t.toId, t.toAmount);
-    if (t.type === "expense") return applyDelta(accounts, t.fromId, -t.fromAmount);
-    return applyDelta(applyDelta(accounts, t.fromId, -t.fromAmount), t.toId, t.toAmount);
+  /* A debt side matches no account id, so applyDelta leaves accounts alone for
+     it and moveDebts does that side instead. A settled (deleted) debt is left
+     as it is — reversing a transfer must not bring it back. */
+  const moveAccounts = (accounts, t, sign) => {
+    if (t.type === "income") return applyDelta(accounts, t.toId, sign * t.toAmount);
+    if (t.type === "expense") return applyDelta(accounts, t.fromId, -sign * t.fromAmount);
+    return applyDelta(applyDelta(accounts, t.fromId, -sign * t.fromAmount), t.toId, sign * t.toAmount);
   };
-  const reverseTxn = (accounts, t) => {
-    if (t.type === "income") return applyDelta(accounts, t.toId, -t.toAmount);
-    if (t.type === "expense") return applyDelta(accounts, t.fromId, t.fromAmount);
-    return applyDelta(applyDelta(accounts, t.fromId, t.fromAmount), t.toId, -t.toAmount);
+  const moveDebts = (debts, t, sign) => {
+    const deltas = debtDeltas(t, sign);
+    if (!Object.keys(deltas).length) return debts;
+    return (debts || []).map((d) => (deltas[d.id] && !d.deletedAt ? touch(shiftDebt(d, deltas[d.id])) : d));
   };
+  const moveTxn = (s, t, sign) => ({ ...s, accounts: moveAccounts(s.accounts, t, sign), debts: moveDebts(s.debts, t, sign) });
+  const applyTxn = (s, t) => moveTxn(s, t, 1);
+  const reverseTxn = (s, t) => moveTxn(s, t, -1);
 
   /* Fill in toAmount sensibly, then freeze the exchange rates that applied
      today — the whole point of snapshotSides. */
   function normalize(t0) {
-    const from = findAcc(accs, t0.fromId);
-    const to = findAcc(accs, t0.toId);
+    const from = findAcc(sides, t0.fromId);
+    const to = findAcc(sides, t0.toId);
     const sameUnit = from && to && from.unit === to.unit;
     const fa = Number(t0.fromAmount) || 0;
     let ta;
@@ -812,7 +847,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
       subcategory: t0.subcategory || "",
       note: t0.note || "",
     };
-    return touch(snapshotSides(base, accs, prices));
+    return touch(snapshotSides(base, sides, prices));
   }
 
   /* ---- budget warnings ---- */
@@ -848,7 +883,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   /* ---- mutations ---- */
   function addTxn(raw) {
     const t = normalize(raw);
-    setState((s) => ({ ...s, accounts: applyTxn(s.accounts, t), transactions: [t, ...s.transactions] }));
+    setState((s) => ({ ...applyTxn(s, t), transactions: [t, ...s.transactions] }));
     setOpen(false);
     setParsed(null);
     checkBudgets([t]);
@@ -859,9 +894,9 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
     const norm = list.map(normalize);
     if (!norm.length) return;
     setState((s) => {
-      let accounts = s.accounts;
-      norm.forEach((t) => (accounts = applyTxn(accounts, t)));
-      return { ...s, accounts, transactions: [...norm.slice().reverse(), ...s.transactions] };
+      let next = s;
+      norm.forEach((t) => (next = applyTxn(next, t)));
+      return { ...next, transactions: [...norm.slice().reverse(), ...s.transactions] };
     });
     setPending([]);
     setPendingNote(null);
@@ -872,11 +907,10 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   function commitEdit(raw) {
     const old = editTxn;
     const nt = normalize({ ...raw, id: old.id });
-    setState((s) => {
-      let accounts = reverseTxn(s.accounts, old);
-      accounts = applyTxn(accounts, nt);
-      return { ...s, accounts, transactions: s.transactions.map((x) => (x.id === old.id ? nt : x)) };
-    });
+    setState((s) => ({
+      ...applyTxn(reverseTxn(s, old), nt),
+      transactions: s.transactions.map((x) => (x.id === old.id ? nt : x)),
+    }));
     setEditTxn(null);
     checkBudgets([nt]);
     toast("Updated · " + (nt.category || nt.type) + " " + txnLabel(nt));
@@ -884,14 +918,12 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
 
   function delTxn(t) {
     setState((s) => ({
-      ...s,
-      accounts: reverseTxn(s.accounts, t),
+      ...reverseTxn(s, t),
       transactions: s.transactions.map((x) => (x.id === t.id ? tombstone(x) : x)),
     }));
     toast("Deleted · " + (t.category || t.type) + " " + txnLabel(t), {
       undo: () => setState((s) => ({
-        ...s,
-        accounts: applyTxn(s.accounts, t),
+        ...applyTxn(s, t),
         transactions: s.transactions.map((x) => (x.id === t.id ? touch({ ...x, deletedAt: undefined }) : x)),
       })),
     });
@@ -914,8 +946,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
   function logOccurrence(occ) {
     const t = normalize(occurrenceToTxn(occ));
     setState((s) => ({
-      ...s,
-      accounts: applyTxn(s.accounts, t),
+      ...applyTxn(s, t),
       transactions: [t, ...s.transactions],
       recurring: (s.recurring || []).map((x) => (x.id === occ.ruleId ? touch({ ...x, nextDate: afterOccurrence(occ.rule, occ.date) }) : x)),
     }));
@@ -994,12 +1025,12 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
     return txns.filter((t) => {
       if (filterType !== "all" && t.type !== filterType) return false;
       if (!q) return true;
-      const hay = [t.category, t.subcategory, t.note, t.date, sideName(t, "from", accs), sideName(t, "to", accs), String(t.fromAmount), String(t.toAmount)]
+      const hay = [t.category, t.subcategory, t.note, t.date, sideName(t, "from", sides), sideName(t, "to", sides), String(t.fromAmount), String(t.toAmount)]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [txns, query, filterType, accs]);
+  }, [txns, query, filterType, sides]);
 
   const visible = filtered.slice(0, limit);
   const grouped = useMemo(() => {
@@ -1141,7 +1172,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
               Parsed from your note — check the fields and save.
             </div>
           )}
-          <TxnForm key={formKey} accs={accs} onAdd={addTxn} initial={parsed || {}} />
+          <TxnForm key={formKey} accs={accs} people={people} onAdd={addTxn} initial={parsed || {}} />
         </Modal>
       )}
 
@@ -1150,7 +1181,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
           <div className="text-[11px] font-mono mz-txblue border mz-note-blue rounded-lg px-3 py-2 mb-3">
             Balances re-apply on save — the old amounts are reversed first.
           </div>
-          <TxnForm key={"edit-" + editTxn.id} accs={accs} onAdd={commitEdit} initial={editTxn} submitLabel="Save changes" />
+          <TxnForm key={"edit-" + editTxn.id} accs={accs} people={people} onAdd={commitEdit} initial={editTxn} submitLabel="Save changes" />
         </Modal>
       )}
 
@@ -1207,7 +1238,7 @@ export default function Activity({ state, setState, prices, focusSignal, onNavig
                     {relativeDay(g.d)}
                   </div>
                   <div className="divide-y mz-dv">
-                    {g.items.map((t) => <TxnRow key={t.id} t={t} accs={accs} onEdit={(x) => { setEditTxn(x); setOpen(false); setParsed(null); }} onDelete={delTxn} />)}
+                    {g.items.map((t) => <TxnRow key={t.id} t={t} accs={sides}onEdit={(x) => { setEditTxn(x); setOpen(false); setParsed(null); }} onDelete={delTxn} />)}
                   </div>
                 </div>
               ))}
