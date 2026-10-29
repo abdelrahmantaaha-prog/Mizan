@@ -96,6 +96,39 @@ parse already running. The share arrives as a `POST` that
 hand-written rather than generated. (Android/desktop Chromium; iOS Safari has
 no share-target API.)
 
+## Android app (APK)
+
+The same build also ships as a native Android app, wrapped with Capacitor
+(`android/` is committed; `capacitor.config.json` at the root). Download
+`mizan.apk` from the latest GitHub release onto the phone and open it.
+
+What is different inside the APK, all of it gated on `isNative()` in
+[`src/lib/native.js`](src/lib/native.js) so the web app is untouched:
+
+- **Everything stays on the phone.** There is no `/api` behind the app, so
+  account sync and Telegram capture are off, and prices come straight from the
+  public rate APIs. Move data with *Settings → Backup* and *Restore*.
+- **Backups and CSVs go through the share sheet** (a blob download does
+  nothing in an Android WebView) — save them to Drive, Files, or anywhere.
+- **Back** closes the open dialog, then Settings, then returns to Overview, and
+  only from Overview leaves the app.
+- No service worker: the APK carries its files and updates by installing a new
+  APK. The share target is a PWA feature and is not in the APK yet.
+
+**Building.** Pushing a `v*` tag runs
+[`.github/workflows/android.yml`](.github/workflows/android.yml), which tests,
+builds and — when the four `ANDROID_*` signing secrets are set — attaches a
+signed `mizan.apk` to the release. Locally (JDK 21 + Android SDK):
+
+```bash
+npm run build && npx cap sync android
+cd android && ./gradlew assembleRelease   # MIZAN_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD sign it
+```
+
+The signing keystore lives outside the repository. Every release must be
+signed with the same one, or phones have to uninstall (wiping Mizan's data) to
+accept the update.
+
 ## Logging without opening the app
 
 Four routes in, ordered by how little they ask of you:

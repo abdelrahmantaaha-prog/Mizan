@@ -4,10 +4,15 @@
    build without warning — mid-edit, a reload can drop what you were typing.
    Now a new version announces itself and waits for a tap. */
 
+import { isNative } from "./native.js";
+
 let applyUpdate = null;
 
 export async function initPWA({ onNeedRefresh, onOfflineReady }) {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+  // The Android app carries its files inside the APK and updates by installing
+  // a new one; a worker there would only cache what is already on the device.
+  if (isNative()) return;
   try {
     const { registerSW } = await import("virtual:pwa-register");
     applyUpdate = registerSW({

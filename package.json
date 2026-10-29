@@ -1,7 +1,7 @@
 {
   "name": "mizan",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@auth/express": "^0.10.0",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/filesystem": "^7.1.9",
+    "@capacitor/share": "^7.0.4",
     "@neondatabase/serverless": "^1.0.0",
     "express": "^4.21.2",
     "lucide-react": "^0.469.0",
@@ -18,6 +22,8 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/cli": "^7.6.10",
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.0.0",

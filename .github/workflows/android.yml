@@ -1,0 +1,101 @@
+name: Build Android APK
+
+# GitHub's ubuntu runners ship the Android SDK, so this needs nothing installed
+# locally. Pushing a v* tag also publishes the APK as a release asset — far
+# easier to download straight onto a phone than a CI artifact.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # needed only by the release step on tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Lifted to job level on purpose: the `secrets` context is not available
+    # in a step-level `if:`, so this is the one place it can be tested.
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fail fast on logic regressions before spending time on Gradle.
+      - name: Unit tests
+        run: npm test
+
+      # dist/ is gitignored, and `cap sync` copies it into the Android assets.
+      - name: Build web assets
+        run: npm run build
+
+      # Capacitor 7 / AGP 8.7 require JDK 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Capacitor sync
+        run: npx cap sync android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # Release signing only when the keystore secret is present (see the
+      # README). Without it the build is a debug APK signed with a key the
+      # runner makes up each run, so it would not install over a real one.
+      - name: Decode signing keystore
+        id: keystore
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed release APK
+        if: steps.keystore.outputs.signed == 'true'
+        working-directory: android
+        env:
+          MIZAN_STORE_FILE: release.keystore
+          MIZAN_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MIZAN_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MIZAN_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          MIZAN_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Build debug APK
+        if: steps.keystore.outputs.signed != 'true'
+        working-directory: android
+        env:
+          MIZAN_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Collect APK
+        run: |
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          echo "Found $APK"
+          cp "$APK" mizan.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mizan-apk
+          path: mizan.apk
+          retention-days: 14
+
+      # Only a properly signed APK is ever attached to a release: a debug one
+      # would refuse to install over the real app, or replace one that does.
+      - name: Attach APK to release
+        if: startsWith(github.ref, 'refs/tags/v') && steps.keystore.outputs.signed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mizan.apk

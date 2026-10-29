@@ -12,6 +12,7 @@
       derive a local price from the global spot. */
 
 import { OZ_TO_GRAM } from "./valuation.js";
+import { isNative } from "./native.js";
 
 export const SEED_PRICES = {
   usdEgp: 49.9,
@@ -74,6 +75,9 @@ async function fetchDirectPrices(prev) {
 /* Proxy first, direct as the fallback. Returns source:"blocked" only when
    neither route produced anything usable. */
 export async function fetchLivePrices(prev) {
+  // The Android app has no server of its own behind /api, and its WebView
+  // is not held back by the browser sandboxes the proxy exists for.
+  if (isNative()) return fetchDirectPrices(prev);
   try {
     return await fetchProxyPrices();
   } catch {

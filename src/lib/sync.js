@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { mergeState, fingerprint, sameDoc } from "../../shared/model.js";
+import { isNative } from "./native.js";
 
 const API = {
   me: "/api/me",
@@ -114,6 +115,8 @@ export function useSync({ state, adopt, loaded }) {
   /* one capability probe on boot: does this deployment even have sync? */
   const probe = useCallback(async () => {
     try {
+      // the Android app has no /api behind it — skip the round trip
+      if (isNative()) throw new Error("native");
       const r = await fetch(API.me, { credentials: "same-origin" });
       if (!r.ok) throw new Error("me-" + r.status);
       const j = await r.json();

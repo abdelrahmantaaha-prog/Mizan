@@ -20,6 +20,7 @@ import { egpValue } from "./lib/valuation.js";
 import { zakatStatus, nextHawlStart } from "./lib/zakat.js";
 import { useSync } from "./lib/sync.js";
 import { initPWA, reloadWithUpdate, subscribeOnline } from "./lib/pwa.js";
+import { onBackButton } from "./lib/native.js";
 import { hasShareFlag, clearShareFlag, takeShare } from "./lib/share.js";
 import {
   emptyState, migrate, live, touchScalar, prune,
@@ -121,6 +122,22 @@ export default function Mizan() {
   /* ---------- connectivity + service worker ---------- */
   useEffect(() => subscribeOnline(setOnline), []);
   useEffect(() => { initPWA({ onNeedRefresh: () => setUpdateReady(true) }); }, []);
+
+  /* Android Back: close the open dialog (dialogs already close on Escape),
+     then Settings, then go back to Overview, and only from Overview leave. */
+  const backRef = useRef(null);
+  backRef.current = { tab, settingsOpen };
+  useEffect(() => onBackButton(({ minimize }) => {
+    if (document.querySelector('[role="dialog"]')) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    } else if (backRef.current.settingsOpen) {
+      setSettingsOpen(false);
+    } else if (backRef.current.tab !== "overview") {
+      setTab("overview");
+    } else {
+      minimize();
+    }
+  }), []);
 
   /* ---------- how the app was opened ----------
      Two entry points land here with the tab already decided: the home-screen

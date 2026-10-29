@@ -6,8 +6,11 @@
 
 import { outEgp, inEgp, sideName, sideUnitLabel } from "./valuation.js";
 import { live } from "../../shared/model.js";
+import { isNative, saveFileNative } from "./native.js";
 
-export function downloadFile(name, text, mime = "application/json") {
+/* Resolves to "downloaded" on the web, "shared" or "saved" in the Android app. */
+export async function downloadFile(name, text, mime = "application/json") {
+  if (isNative()) return saveFileNative(name, text, mime);
   const blob = new Blob([text], { type: mime + ";charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -18,6 +21,7 @@ export function downloadFile(name, text, mime = "application/json") {
   a.remove();
   // give the browser a tick to start the download before revoking
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return "downloaded";
 }
 
 export function readFile(file) {
@@ -36,7 +40,7 @@ export function backupPayload(state, prices) {
 }
 
 export function exportBackupFile(state, prices) {
-  downloadFile(`mizan-backup-${stamp()}.json`, backupPayload(state, prices));
+  return downloadFile(`mizan-backup-${stamp()}.json`, backupPayload(state, prices));
 }
 
 /* RFC 4180: quote anything containing a delimiter, quote or newline, and
@@ -77,7 +81,7 @@ export function transactionsCsv(state, prices) {
 }
 
 export function exportTransactionsCsv(state, prices) {
-  downloadFile(`mizan-transactions-${stamp()}.csv`, transactionsCsv(state, prices), "text/csv");
+  return downloadFile(`mizan-transactions-${stamp()}.csv`, transactionsCsv(state, prices), "text/csv");
 }
 
 export function accountsCsv(state, prices, egpValue) {
@@ -90,5 +94,5 @@ export function accountsCsv(state, prices, egpValue) {
 }
 
 export function exportAccountsCsv(state, prices, egpValue) {
-  downloadFile(`mizan-accounts-${stamp()}.csv`, accountsCsv(state, prices, egpValue), "text/csv");
+  return downloadFile(`mizan-accounts-${stamp()}.csv`, accountsCsv(state, prices, egpValue), "text/csv");
 }

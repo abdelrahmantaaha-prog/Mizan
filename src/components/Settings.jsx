@@ -4,6 +4,7 @@ import React, { useRef, useState } from "react";
 import { ArrowLeft, KeyRound, Cloud, Download, Upload, FileSpreadsheet, Send } from "lucide-react";
 import { Card, CardTitle, Field, ConfirmButton, Segmented, inputCls, useToast } from "./ui.jsx";
 import { aiProviderName, testGeminiKey, DEFAULT_GEMINI_MODEL, GEMINI_MODELS } from "../lib/ai.js";
+import { isNative } from "../lib/native.js";
 import { exportBackupFile, exportTransactionsCsv, exportAccountsCsv, readFile } from "../lib/exportImport.js";
 import { egpValue } from "../lib/valuation.js";
 import { migrate, emptyState, live } from "../../shared/model.js";
@@ -25,12 +26,20 @@ function SyncCard({ sync }) {
           </span>
           <CardTitle>Account sync</CardTitle>
         </span>
-        <p className="text-[12px] mz-tx2 mt-2 leading-relaxed">
-          Not available on this deployment. Mizan keeps everything on this device, which works — but backups are the only way to move data.
-          {sync.capability.auth && !sync.capability.db && " (Sign-in is configured, but no database is connected.)"}
-          {!sync.capability.auth && sync.capability.db && " (A database is connected, but Google sign-in isn't configured.)"}
-        </p>
-        <p className="text-[11px] mz-tx3 mt-2 font-mono">to enable: set AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET and DATABASE_URL</p>
+        {isNative() ? (
+          <p className="text-[12px] mz-tx2 mt-2 leading-relaxed">
+            The Android app keeps everything on this phone. To move your data to or from another device, save a backup below and restore it there.
+          </p>
+        ) : (
+          <>
+            <p className="text-[12px] mz-tx2 mt-2 leading-relaxed">
+              Not available on this deployment. Mizan keeps everything on this device, which works — but backups are the only way to move data.
+              {sync.capability.auth && !sync.capability.db && " (Sign-in is configured, but no database is connected.)"}
+              {!sync.capability.auth && sync.capability.db && " (A database is connected, but Google sign-in isn't configured.)"}
+            </p>
+            <p className="text-[11px] mz-tx3 mt-2 font-mono">to enable: set AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET and DATABASE_URL</p>
+          </>
+        )}
       </Card>
     );
   }
@@ -385,13 +394,16 @@ export default function SettingsPage({
             A backup file holds everything: accounts, transactions, debts, budgets, targets and history. Keep one somewhere safe — clearing site data clears the app.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
-            <button onClick={() => { exportBackupFile(state, prices); setDataMsg("Backup downloaded."); }} className="mz-btn-primary text-sm font-medium py-2 rounded-lg inline-flex items-center justify-center gap-1.5">
+            <button onClick={() => exportBackupFile(state, prices).then(
+              (how) => setDataMsg(how === "downloaded" ? "Backup downloaded." : how === "shared" ? "Backup saved." : "Backup written to the app's files, but not shared anywhere yet."),
+              () => setDataMsg("Could not save the backup."),
+            )} className="mz-btn-primary text-sm font-medium py-2 rounded-lg inline-flex items-center justify-center gap-1.5">
               <Download size={15} strokeWidth={2} /> Backup (.json)
             </button>
-            <button onClick={() => exportTransactionsCsv(state, prices)} className="text-sm font-medium py-2 rounded-lg mz-btn-ghost inline-flex items-center justify-center gap-1.5">
+            <button onClick={() => exportTransactionsCsv(state, prices).catch(() => setDataMsg("Could not save the file."))} className="text-sm font-medium py-2 rounded-lg mz-btn-ghost inline-flex items-center justify-center gap-1.5">
               <FileSpreadsheet size={15} strokeWidth={2} /> Transactions CSV
             </button>
-            <button onClick={() => exportAccountsCsv(state, prices, egpValue)} className="text-sm font-medium py-2 rounded-lg mz-btn-ghost inline-flex items-center justify-center gap-1.5">
+            <button onClick={() => exportAccountsCsv(state, prices, egpValue).catch(() => setDataMsg("Could not save the file."))} className="text-sm font-medium py-2 rounded-lg mz-btn-ghost inline-flex items-center justify-center gap-1.5">
               <FileSpreadsheet size={15} strokeWidth={2} /> Accounts CSV
             </button>
           </div>

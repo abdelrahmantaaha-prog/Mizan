@@ -1,0 +1,10 @@
+{
+  "appId": "app.mizan.money",
+  "appName": "Mizan",
+  "webDir": "dist",
+  "backgroundColor": "#0C1730",
+  "android": {
+    "allowMixedContent": false,
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}
