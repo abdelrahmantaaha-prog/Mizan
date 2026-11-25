@@ -1,275 +1,131 @@
 # Mizan · ميزان
 
-Net-worth and expense tracker built for Egyptian holdings: gold by karat valued
-at live EGP spot, multi-currency cash, a liquid-only allocation ribbon, AI
-quick-add (text, dictation, a stack of receipt photos and PDFs at once),
-budgets, debts, recurring entries, and zakat with a hawl clock.
+**A net-worth and expense tracker built for Egyptian holdings.**
 
-Logging is meant to survive not feeling like logging: one-tap repeats learned
-from your own ledger, a system share target, a Telegram bot for when the app
-isn't open, and a statement sweep for the weeks you skipped entirely.
+Mizan tracks gold by karat at live EGP prices, cash in several currencies,
+debts, budgets and recurring entries, and works out zakat with a hawl clock.
+Logging an expense takes a tap, a share from another app, or a message to a
+Telegram bot.
 
-Local-first. Everything works with no account, no network and no backend —
-signing in only adds sync across your devices.
+It is local-first: everything works with no account, no network and no
+backend. Signing in only adds sync between your devices.
 
-## Run locally
+## Features
+
+- **Net worth**: accounts in EGP, other currencies and gold (by karat), valued
+  at today's prices, with a liquid-only allocation view and history.
+- **Expenses and income**: categories, budgets, targets, debts and recurring
+  entries. Each transaction keeps the exchange rate of the day it was logged,
+  so changing prices never rewrite past months.
+- **Quick add**: type, dictate, or attach a stack of receipt photos and PDFs at
+  once. Each receipt is read separately with Gemini, using your own key; a
+  built-in offline parser covers typed entries without one.
+- **Repeats**: Mizan learns from your own ledger, so `uber` becomes a one-tap
+  entry with the usual category, account and amount.
+- **Statement sweep**: paste rows, a CSV, a bank PDF or screenshots, and review
+  every line at once. Lines that look like ones you already logged are flagged,
+  never silently dropped.
+- **Share target**: send receipts, invoices or bank SMS to Mizan from any app's
+  share sheet (installed PWA on Android and desktop Chromium).
+- **Telegram capture** (optional): text the bot `80 uber` or send it a photo,
+  and confirm it the next time you open the app.
+- **Zakat**: gold and silver nisab from live prices, with a hawl clock.
+- **Prices**: gold, silver and USD/EGP from a built-in proxy or public APIs,
+  or the local Egyptian gold-market price looked up on the web. You can always
+  set prices by hand.
+- **Backup and export**: a full `.json` backup plus CSV exports.
+
+## Getting started
 
 ```bash
 npm install
 npm run dev
-```
-
-```bash
 npm test
 ```
 
-The tests cover the parts where a silent bug costs real data: document merge,
-migration, the sync push path, transaction valuation, zakat, and the PDF reader
-— which has to refuse a file it cannot honestly read rather than hand back
-plausible nonsense.
+`npm run dev` serves the app only. That is enough for working on the UI; sync
+and the price proxy report themselves unavailable. To run the API locally too,
+use `vercel dev`.
 
-## Deploy to Vercel
+**AI features**: get a free key at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it
+under **Settings → AI features**. The key stays on your device. Mizan picks the
+newest Gemini Flash model your key supports and falls back if one is retired or
+out of quota.
 
-1. Push this folder to a Git repo.
-2. In Vercel: **Add New → Project → import the repo**. `vercel.json` already
-   declares the build (`vite build` → `dist`) and the `/api` function.
+## Deploying
 
-That gets you the full app plus the price proxy. Account sync additionally
-needs the environment variables below; without them the app runs local-only and
-says so in Settings rather than showing a broken sign-in button.
+Import the repository into Vercel. `vercel.json` already declares the build
+(`vite build` → `dist`) and the `/api` function, which gives you the full app
+and the price proxy. Once deployed over HTTPS, Mizan can be installed as an
+app from the browser and works offline.
 
-## Account sync (optional)
+### Account sync (optional)
 
-Sign in with Google and Mizan keeps accounts, transactions, debts, budgets,
-targets and history in step across devices.
+Sign in with Google to keep everything in step across devices. Both devices
+push their whole document and the server merges it record by record: the
+newest edit wins, and deletions carry over instead of being undone. Your
+Gemini key and theme are never uploaded.
 
-**How conflicts are handled.** Both devices push their whole document; the
-server merges it record by record, newest edit wins, and deletes are
-tombstoned so they propagate instead of being undone by the other device's
-copy. Logging an expense on your phone while editing an account on your laptop
-keeps both. The merge is symmetric and idempotent, so re-syncing never
-degrades — the same logic runs on the client and the server, from
-[`shared/model.js`](shared/model.js).
+1. **Database**: Vercel → Storage → Create Database → Neon. This sets
+   `DATABASE_URL`, and the table is created on first use.
+2. **Auth secret**: run `npx auth secret` and set `AUTH_SECRET`.
+3. **Google OAuth**: create a Web OAuth client in Google Cloud Console, set
+   `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`, and add the redirect URIs
+   `https://<your-project>.vercel.app/api/auth/callback/google` and
+   `http://localhost:3000/api/auth/callback/google`.
 
-**What is never uploaded:** your Gemini API key and your theme. They stay on
-the device.
+### Telegram capture (optional)
 
-### Setup
+Needs sync to be set up. Create a bot with @BotFather, set
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` and `TELEGRAM_BOT_USERNAME`, and
+register the webhook. Then link your account from **Settings → Telegram
+capture**. The server only stores what you send; parsing happens in your
+browser with your own key.
 
-1. **Database** — Vercel dashboard → **Storage → Create Database → Neon**. The
-   integration injects `DATABASE_URL`. The table is created on first use.
-2. **Auth secret** — `npx auth secret`, then set `AUTH_SECRET`.
-3. **Google OAuth** — Google Cloud Console → *APIs & Services → Credentials →
-   Create credentials → OAuth client ID → Web application*. Set
-   `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`, and add these authorised redirect
-   URIs:
+[`.env.example`](.env.example) lists every variable with step-by-step notes.
+Without them, Mizan hides the features they enable.
 
-   ```
-   https://<your-project>.vercel.app/api/auth/callback/google
-   http://localhost:3000/api/auth/callback/google
-   ```
+## Android app
 
-See [`.env.example`](.env.example) for the full list.
+The same build ships as an Android app wrapped with Capacitor (`android/`). It
+keeps everything on the phone: sync and Telegram are off, prices come from the
+public rate APIs, and backups go through the share sheet.
 
-Running the API locally needs `vercel dev` (plain `vite dev` serves the
-frontend only, which is a supported way to work on the UI — sync simply reports
-itself unavailable).
-
-## Install as an app (PWA)
-
-Mizan ships a manifest, icons and a service worker, so once deployed over HTTPS
-it's installable:
-
-- **Chrome / Edge desktop:** install icon in the address bar → *Install Mizan*.
-- **Android Chrome:** menu (⋮) → *Add to Home screen*.
-- **iOS Safari:** Share → *Add to Home Screen*.
-
-The app precaches itself and opens offline. A new build announces itself with a
-*New version ready* prompt instead of reloading underneath you; API calls are
-never served from cache.
-
-Installed, Mizan also registers as a **share target**: receipt photos, a PDF
-invoice, an Instapay confirmation or a bank SMS can be sent to it from any app's
-share sheet — several at once — and it opens straight into quick-add with the
-parse already running. The share arrives as a `POST` that
-[`src/sw.js`](src/sw.js) answers — which is why the service worker is
-hand-written rather than generated. (Android/desktop Chromium; iOS Safari has
-no share-target API.)
-
-## Android app (APK)
-
-The same build also ships as a native Android app, wrapped with Capacitor
-(`android/` is committed; `capacitor.config.json` at the root). Download
-`mizan.apk` from the latest GitHub release onto the phone and open it.
-
-What is different inside the APK, all of it gated on `isNative()` in
-[`src/lib/native.js`](src/lib/native.js) so the web app is untouched:
-
-- **Everything stays on the phone.** There is no `/api` behind the app, so
-  account sync and Telegram capture are off, and prices come straight from the
-  public rate APIs. Move data with *Settings → Backup* and *Restore*.
-- **Backups and CSVs go through the share sheet** (a blob download does
-  nothing in an Android WebView) — save them to Drive, Files, or anywhere.
-- **Back** closes the open dialog, then Settings, then returns to Overview, and
-  only from Overview leaves the app.
-- No service worker: the APK carries its files and updates by installing a new
-  APK. The share target is a PWA feature and is not in the APK yet.
-
-**Building.** Pushing a `v*` tag runs
-[`.github/workflows/android.yml`](.github/workflows/android.yml), which tests,
-builds and — when the four `ANDROID_*` signing secrets are set — attaches a
-signed `mizan.apk` to the release. Locally (JDK 21 + Android SDK):
+Pushing a `v*` tag runs [`.github/workflows/android.yml`](.github/workflows/android.yml),
+which tests, builds and attaches a signed `mizan.apk` to the release when the
+four `ANDROID_*` signing secrets are set. To build locally (JDK 21 and the
+Android SDK):
 
 ```bash
 npm run build && npx cap sync android
-cd android && ./gradlew assembleRelease   # MIZAN_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD sign it
+cd android && ./gradlew assembleRelease
 ```
 
-The signing keystore lives outside the repository. Every release must be
-signed with the same one, or phones have to uninstall (wiping Mizan's data) to
-accept the update.
+Set `MIZAN_STORE_FILE`, `MIZAN_STORE_PASSWORD`, `MIZAN_KEY_ALIAS` and
+`MIZAN_KEY_PASSWORD` to sign it. Every release must be signed with the same
+keystore, or phones have to uninstall (losing their data) to update.
 
-## Logging without opening the app
+## Your data
 
-Four routes in, ordered by how little they ask of you:
+Everything lives in your browser unless you sign in. Clearing site data clears
+the app, so keep a backup (**Settings → Backup & export**). With a Gemini key,
+the text or images you ask it to read are sent to Google.
 
-| Route | What it costs you |
-| --- | --- |
-| **Repeat** — type `uber`, tap *Log now* | one tap; no network, no model |
-| **Share sheet** — send a receipt to Mizan from anywhere | one share |
-| **Telegram** — text the bot, confirm later | one message, whenever |
-| **Statement sweep** — paste or screenshot a statement | one pass a month |
-
-**Repeats** come from [`src/lib/memory.js`](src/lib/memory.js), which indexes
-your own ledger by the words in its notes: category, subcategory, the account
-that usually pays, and the median amount. Recency is weighted with a 90-day
-half-life, so switching from cash to a card changes the answer in a few uses
-rather than being outvoted by a year of history. A word split evenly between
-two meanings answers nothing at all. It also backs the offline parser, so a
-missing key stops being a downgrade on anything you log often.
-
-**The statement sweep** reads the PDF your bank emailed, pasted rows, CSV
-exports or screenshots of a banking app, and proposes every line at once. Lines
-that match something already in the ledger (same type, same amount, within
-three days) arrive **flagged and unticked, never removed** — a bank posts on a
-different day than you spent, and two 70 EGP rides on one Tuesday is a real
-Tuesday.
-
-## Receipts and PDFs
-
-Quick add takes a stack, not a file: pick the evening's four receipts and the
-PDF the restaurant emailed, and each is read **on its own call**, so every
-receipt keeps its own store, its own date and its own total. Sending them
-together is what makes three totals come back as one number nobody recognises.
-Pages of a single long invoice are the other case, and there is a checkbox for
-it — off by default, because separate receipts are what people actually have.
-
-**A PDF is routed, not converted.** Mizan opens it in the browser first
-([`src/lib/pdf.js`](src/lib/pdf.js), no library — inflate plus a content-stream
-tokenizer) and tries to recover the text:
-
-| what the PDF is | what happens |
-| --- | --- |
-| an e-statement or invoice with a text layer | the text is pulled out here; **no vision call at all**, twelve pages cost one small text request, and the offline parser can read it |
-| a scan, or password-protected | the file itself goes to the model, which reads the pages |
-| Arabic | the file goes to the model — see below |
-
-Text in a PDF is positioned rather than flowed, so the reader rebuilds rows
-from where each run is drawn, and follows each font's ToUnicode table to turn
-glyph numbers back into characters — without that, everything printed from a
-browser in the last decade decodes to fluent-looking nonsense.
-
-Which is the danger the whole thing is shaped around: a wrong reading does not
-announce itself, it just quietly writes invented rows into a ledger. So
-extraction has to *prove* it worked — the output has to be overwhelmingly
-printable, have numbers and real words in it — and anything short of that is
-reported unreadable and sent to the model instead. Arabic is refused for the
-same reason: PDFs usually store it in the order it is drawn, right to left, and
-nothing in the file says whether this one did, so a merchant name could arrive
-spelled backwards. The model reads those pages as they look.
-
-The badge under each attachment says which path it took.
-
-## Telegram capture (optional)
-
-Text the bot `80 uber`, or send it a photo of a receipt or a forwarded PDF
-invoice, and it waits for you. Next time you open Mizan, *N waiting from
-Telegram* appears in Activity, and one tap reads them into the same review list
-everything else goes through.
-
-**The server never parses.** It stores exactly what was sent — text, or a
-photo's Telegram file id — and the browser does the reading with your own key.
-Putting a second copy of the key in a server environment variable to save one
-tap would quietly undo the thing the key story is for. Photos stay on
-Telegram's servers and are proxied on demand, so the database holds no image
-bytes.
-
-Linking uses a single-use code from **Settings → Telegram capture**, sent to
-the bot as `/start <code>`; it expires in 15 minutes. `/stop` unlinks, and
-captures are dropped after 30 days if never confirmed.
-
-Setup is three environment variables and one `setWebhook` call — see
-[`.env.example`](.env.example). Without them the app hides the feature rather
-than showing a button that cannot work.
-
-## AI features (Gemini)
-
-Quick-add parsing, receipt reading, balance sync from screenshots and the
-"today (web)" price lookup are AI-powered, using **your own** Google Gemini key:
-
-1. Get a free key at https://aistudio.google.com/apikey
-2. **Settings → AI features → paste key → Save** (*Test key* reports which
-   model answered).
-
-The model defaults to **auto**: the app asks Google's ListModels API which Flash
-models your key supports, uses the newest, and falls back automatically if
-Google retires an ID or a free-tier quota runs out.
-
-Without a key, AI boxes fall back to a built-in offline parser; typed entries
-always work. (Inside a Claude.ai artifact, calls route to the auto-authenticated
-Anthropic endpoint and no key is needed.)
-
-## Prices
-
-Three routes, cheapest first:
-
-1. **`/api/prices`** — this deployment's own endpoint. Fetches server-side, so
-   browser CORS never blocks it, and returns gold, **silver** (for the silver
-   zakat nisab) and USD/EGP.
-2. **Public APIs direct from the browser** — the fallback when there's no
-   backend.
-3. **AI with search grounding** — the *today (web)* button. The only route that
-   reads the Egyptian local صاغة price rather than deriving it from global spot.
-
-Every karat rescales from the 24K number, and you can always set prices by hand.
-
-## A note on how amounts are valued
-
-An account **balance** is worth what today's price says — that's the point of a
-live net-worth figure. A **transaction** records the EGP rate that applied when
-it was logged, and all spending analysis reads that snapshot. Without this, a
-refreshed gold or FX price quietly rewrites past months: a $100 dinner from last
-year grows every time the pound weakens, and "what I spent in March" is a
-different number depending on when you ask.
-
-## Data & backups
-
-Everything lives in your browser unless you sign in. **Settings → Backup &
-export** downloads a `.json` backup (accounts, transactions, debts, budgets,
-targets, history) plus CSV exports of transactions and accounts for a
-spreadsheet. Clearing site data clears the app — keep a backup.
-
-## Stack
-
-Vite · React 18 · Tailwind CSS v4 · lucide-react · Auth.js (`@auth/express`) ·
-Neon Postgres · Vercel.
+## Project layout
 
 ```
-shared/model.js        data model + merge — imported by both app and server
-src/lib/               valuation, prices, parsing, zakat, sync, export
-src/lib/pdf.js         PDF text extraction, no dependency
-src/lib/files.js       one shape for anything picked, shared or dropped in
-src/components/        one file per tab, plus shared primitives
-api/                   the Vercel function: auth, sync, price proxy
-test/                  node:test, no runner needed
+shared/model.js   data model and merge, used by the app and the server
+src/lib/          valuation, prices, parsing, PDF reading, zakat, sync, export
+src/components/   one file per tab, plus shared parts
+src/sw.js         hand-written service worker, including the share target
+api/              Vercel function: auth, sync, price proxy, Telegram
+android/          Capacitor Android app
+test/             node:test suites
+docs/             design notes
 ```
+
+Built with Vite, React 18, Tailwind CSS v4, lucide-react, Auth.js and Neon
+Postgres. [`docs/DESIGN.md`](docs/DESIGN.md) explains how the merge, receipt
+and PDF reading, repeats, the statement sweep, Telegram capture, prices and
+valuation work, and why.
