@@ -129,3 +129,7 @@ Built with Vite, React 18, Tailwind CSS v4, lucide-react, Auth.js and Neon
 Postgres. [`docs/DESIGN.md`](docs/DESIGN.md) explains how the merge, receipt
 and PDF reading, repeats, the statement sweep, Telegram capture, prices and
 valuation work, and why.
+
+## License
+
+[MIT](LICENSE): free to use, copy, change and redistribute, including commercially.

@@ -1,6 +1,7 @@
 {
   "name": "mizan",
   "private": true,
+  "license": "MIT",
   "version": "2.1.0",
   "type": "module",
   "scripts": {
