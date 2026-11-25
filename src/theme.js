@@ -21,13 +21,7 @@ import {
   ReceiptText, HandHeart, Sparkles, ArrowDownToLine, Tag,
 } from "lucide-react";
 
-// the deep end of the field, used where something must sit on the ground itself
-export const INK = "#0C1F33";
-export const INK_2 = "#123B4A";     // one step along the gradient
-export const HAIRLINE = "rgba(234,244,244,0.14)";
 export const ACCENT = "#3E93A8";    // the ground's own hue, for the few places JS needs one
-export const ACCENT_DIM = "#33788A";
-export const MUTED_ON_DARK = "#B9CFD1";
 
 /* The three signals. Money in, money out, look at this. */
 export const TEAL = "#3FB49A";

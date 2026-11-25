@@ -25,8 +25,6 @@ export const fmtNum = (n, d = 2) =>
 
 export const fmtPct = (n) => (safe(n) >= 0 ? "+" : "−") + Math.abs(safe(n)).toFixed(1) + "%";
 
-export const fmtSigned = (n) => (safe(n) >= 0 ? "+" : "−") + Math.round(Math.abs(safe(n))).toLocaleString("en-US");
-
 export const timeAgo = (ts) => {
   if (!ts) return "never";
   const s = Math.floor((Date.now() - ts) / 1000);

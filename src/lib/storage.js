@@ -88,5 +88,3 @@ export function saveKeyDebounced(key, value, ms = 400) {
   if (timer) clearTimeout(timer);
   timer = setTimeout(flushNow, ms);
 }
-
-export const flushPending = flushNow;
