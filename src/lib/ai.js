@@ -41,44 +41,13 @@ const FALLBACK_CHAIN = [
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-/* The shared key pool (keybroker): one address holding the keys every project
-   in this folder rotates, and the cooldowns they have already discovered. It
-   proxies Google's own API, so the only thing that changes is where a call is
-   posted and what goes in ?key= — the model chain, the search grounding and
-   the image parts below all work exactly as they did.
-
-   A build can carry defaults and Settings can override them. A browser app has
-   nowhere to hide a token, which is why each app holds its own, revocable on
-   its own, and why the key in Settings stays where it is: it is what answers
-   when the pool cannot be reached. */
-export function brokerFrom(cfg = {}) {
-  const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
-  const url = String(cfg.brokerUrl || env.VITE_BROKER_URL || "").trim().replace(/[/]+$/, "");
-  const token = String(cfg.brokerToken || env.VITE_BROKER_TOKEN || "").trim();
-  return url && token ? { url, token } : null;
-}
-
 /* Where this call goes, and what it presents as its key. */
 function route(cfg) {
-  const pool = cfg.__pool;
-  return pool
-    ? { base: pool.url + "/gemini/v1beta", key: pool.token }
-    : { base: GEMINI_BASE, key: (cfg.geminiKey || "").trim() };
-}
-
-/* A failure of the pool itself rather than a refusal from the model. A refusal
-   would be a refusal on the local key too; this is worth retrying there. */
-function poolIsDown(err) {
-  const msg = ((err && err.message) || "").toLowerCase();
-  return /failed to fetch|networkerror|load failed|broker_auth|broker_not_found|50[234]/.test(msg);
+  return { base: GEMINI_BASE, key: (cfg.geminiKey || "").trim() };
 }
 
 let resolvedCache = null; // { key, candidates: [...] }
 let lastUsed = null;      // model name that served the most recent success
-
-export function lastGeminiModel() {
-  return lastUsed;
-}
 
 /* ask the API which text-capable Flash models this key can use, best first */
 async function listFlashModels(key, base = GEMINI_BASE) {
