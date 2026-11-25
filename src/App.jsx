@@ -223,7 +223,7 @@ export default function Mizan() {
     return { assets, liabilities, net: assets - liabilities, byClass, liquidTotal, illiquidTotal };
   }, [valued, debts]);
 
-  const { assets, liabilities, net, byClass, liquidTotal, illiquidTotal } = totals;
+  const { liabilities, net, byClass, liquidTotal, illiquidTotal } = totals;
 
   /* ---------- daily snapshots ----------
      One net-worth entry per day; same-day changes overwrite. */

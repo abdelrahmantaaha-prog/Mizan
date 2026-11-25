@@ -1,6 +1,6 @@
 /* Overview tab: allocation vs. target, rebalance moves, gold spot, zakat. */
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Plus, Wallet, Building2, HandHeart, Info } from "lucide-react";
 import { Card, CardTitle, Pill } from "./ui.jsx";
 import { fmtEGP, fmtEGPShort, fmtNum, fmtPct, timeAgo } from "../lib/format.js";

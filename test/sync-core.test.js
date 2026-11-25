@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pushDocument, TooLarge, Conflict } from "../api/_sync-core.js";
-import { emptyState, live, touch, tombstone, MAX_DOC_BYTES } from "../shared/model.js";
+import { emptyState, live, tombstone, MAX_DOC_BYTES } from "../shared/model.js";
 
 const NOW = Date.now();
 const ago = (d) => NOW - d * 86400000;

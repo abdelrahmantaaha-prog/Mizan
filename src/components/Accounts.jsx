@@ -8,7 +8,7 @@ import { unitLabel } from "../lib/valuation.js";
 import { parseBalances, localParseBalances, withTimeout } from "../lib/parse.js";
 import { readAttachment, toAiInput } from "../lib/files.js";
 import { CLASS_ORDER, ILLIQUID_CLASS, uid, touch, tombstone, live } from "../../shared/model.js";
-import { CLASS_COLOR, CLASS_ICON, LIABILITY_COLOR, MONO_FONT, TEAL, ROSE } from "../theme.js";
+import { CLASS_COLOR, LIABILITY_COLOR, TEAL, ROSE } from "../theme.js";
 
 /* ---------- one account ---------- */
 function AccountRow({ a, onEdit, onDelete }) {
